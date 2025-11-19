@@ -17,6 +17,7 @@ export type Database = {
       backtest_runs: {
         Row: {
           completed_at: string | null
+          engine_source: string | null
           equity_curve: Json | null
           error: string | null
           id: string
@@ -30,6 +31,7 @@ export type Database = {
         }
         Insert: {
           completed_at?: string | null
+          engine_source?: string | null
           equity_curve?: Json | null
           error?: string | null
           id?: string
@@ -43,6 +45,7 @@ export type Database = {
         }
         Update: {
           completed_at?: string | null
+          engine_source?: string | null
           equity_curve?: Json | null
           error?: string | null
           id?: string
