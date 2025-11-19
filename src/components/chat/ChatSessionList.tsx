@@ -2,10 +2,36 @@ import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Plus, MessageSquare } from 'lucide-react';
+import { Plus, MessageSquare, MoreVertical, Pencil, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useChatContext } from '@/contexts/ChatContext';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
 interface ChatSession {
   id: string;
@@ -18,6 +44,9 @@ export const ChatSessionList = () => {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
   const [loading, setLoading] = useState(true);
   const { selectedSessionId, setSelectedSession } = useChatContext();
+  const [sessionToDelete, setSessionToDelete] = useState<string | null>(null);
+  const [sessionToRename, setSessionToRename] = useState<ChatSession | null>(null);
+  const [newName, setNewName] = useState('');
 
   useEffect(() => {
     loadSessions();
@@ -82,6 +111,63 @@ export const ChatSessionList = () => {
     }
   };
 
+  const deleteSession = async (sessionId: string) => {
+    try {
+      const { error } = await supabase
+        .from('chat_sessions')
+        .delete()
+        .eq('id', sessionId);
+
+      if (error) throw error;
+
+      setSessions(sessions.filter(s => s.id !== sessionId));
+      
+      // If deleted session was selected, clear selection
+      if (selectedSessionId === sessionId) {
+        setSelectedSession(null, null);
+      }
+      
+      toast.success('Chat session deleted');
+    } catch (error) {
+      console.error('Error deleting session:', error);
+      toast.error('Failed to delete chat session');
+    } finally {
+      setSessionToDelete(null);
+    }
+  };
+
+  const renameSession = async () => {
+    if (!sessionToRename || !newName.trim()) return;
+
+    try {
+      const { error } = await supabase
+        .from('chat_sessions')
+        .update({ title: newName.trim() })
+        .eq('id', sessionToRename.id);
+
+      if (error) throw error;
+
+      setSessions(sessions.map(s => 
+        s.id === sessionToRename.id 
+          ? { ...s, title: newName.trim() }
+          : s
+      ));
+      
+      toast.success('Chat session renamed');
+    } catch (error) {
+      console.error('Error renaming session:', error);
+      toast.error('Failed to rename chat session');
+    } finally {
+      setSessionToRename(null);
+      setNewName('');
+    }
+  };
+
+  const openRenameDialog = (session: ChatSession) => {
+    setSessionToRename(session);
+    setNewName(session.title);
+  };
+
   return (
     <div className="flex-1 flex flex-col min-h-0">
       <div className="p-3 border-b border-panel-border flex items-center justify-between">
@@ -113,31 +199,116 @@ export const ChatSessionList = () => {
             </div>
           ) : (
             sessions.map((session) => (
-              <button
+              <div
                 key={session.id}
-                onClick={() => setSelectedSession(session.id, session.workspace_id)}
                 className={cn(
-                  'w-full text-left p-3 rounded-md transition-colors',
-                  'hover:bg-muted/50',
+                  'relative group rounded-md transition-colors',
                   selectedSessionId === session.id && 'bg-muted'
                 )}
               >
-                <div className="flex items-start gap-2">
-                  <MessageSquare className="h-4 w-4 mt-0.5 text-muted-foreground" />
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm truncate">
-                      {session.title}
-                    </div>
-                    <div className="text-xs text-muted-foreground font-mono">
-                      {new Date(session.created_at).toLocaleDateString()}
+                <button
+                  onClick={() => setSelectedSession(session.id, session.workspace_id)}
+                  className="w-full text-left p-3 hover:bg-muted/50 rounded-md"
+                >
+                  <div className="flex items-start gap-2">
+                    <MessageSquare className="h-4 w-4 mt-0.5 text-muted-foreground" />
+                    <div className="flex-1 min-w-0 pr-8">
+                      <div className="font-medium text-sm truncate">
+                        {session.title}
+                      </div>
+                      <div className="text-xs text-muted-foreground font-mono">
+                        {new Date(session.created_at).toLocaleDateString()}
+                      </div>
                     </div>
                   </div>
+                </button>
+                
+                <div className="absolute right-2 top-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-6 w-6"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <MoreVertical className="h-3 w-3" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => openRenameDialog(session)}>
+                        <Pencil className="h-3 w-3 mr-2" />
+                        Rename
+                      </DropdownMenuItem>
+                      <DropdownMenuItem 
+                        onClick={() => setSessionToDelete(session.id)}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <Trash2 className="h-3 w-3 mr-2" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
-              </button>
+              </div>
             ))
           )}
         </div>
       </ScrollArea>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={!!sessionToDelete} onOpenChange={() => setSessionToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Chat Session</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete this chat session? This will permanently delete all messages in this conversation. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={() => sessionToDelete && deleteSession(sessionToDelete)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Rename Dialog */}
+      <Dialog open={!!sessionToRename} onOpenChange={() => setSessionToRename(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Rename Chat Session</DialogTitle>
+            <DialogDescription>
+              Enter a new name for this chat session.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="name">Session Name</Label>
+              <Input
+                id="name"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && renameSession()}
+                placeholder="Enter session name..."
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSessionToRename(null)}>
+              Cancel
+            </Button>
+            <Button onClick={renameSession} disabled={!newName.trim()}>
+              Rename
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
