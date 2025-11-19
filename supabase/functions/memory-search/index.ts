@@ -49,12 +49,16 @@ serve(async (req) => {
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Use the search_memory_notes database function for semantic search
+    // Only search non-archived notes with embeddings
     const { data, error } = await supabase.rpc('search_memory_notes', {
       query_embedding: queryEmbedding,
       match_workspace_id: workspaceId,
       match_threshold: 0.5, // Adjust threshold as needed (0.5 = 50% similarity minimum)
       match_count: Math.min(limit, 50), // Cap at 50 for safety
     });
+
+    // Filter out archived notes (additional safety check)
+    const filteredData = data?.filter((note: any) => note.archived !== true) || [];
 
     if (error) {
       console.error('Error searching memory notes:', error);
@@ -64,10 +68,10 @@ serve(async (req) => {
       );
     }
 
-    console.log(`Found ${data?.length || 0} matching memory notes`);
+    console.log(`Found ${filteredData.length} matching active memory notes`);
 
     return new Response(
-      JSON.stringify({ results: data || [] }),
+      JSON.stringify({ results: filteredData }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {
