@@ -313,6 +313,38 @@ The chat uses a specialized **Chief Quant Researcher** identity defined in `supa
 
 ---
 
+## Agent Modes
+
+The Chief Quant identity supports specialized operating modes for different research tasks.
+
+### Strategy Auditor Mode
+
+Accessible via `/audit_run` slash command. Performs deep, structured analysis of individual backtest runs.
+
+**Purpose**: Critical review of a single backtest run for structural edge, robustness, and failure modes.
+
+**Inputs**:
+- Backtest run summary (params, metrics, equity curve)
+- Relevant memory notes (run-linked, strategy-tagged, high-priority rules/warnings)
+
+**Output Structure**:
+1. **Quick Overview**: What the run tests and high-level conclusions
+2. **Structural Edge Assessment**: Evidence of true edge vs curve-fitting, convexity vs grind
+3. **Failure Modes & Risks**: Major failure scenarios and regime dependencies
+4. **Rule & Memory Alignment**: Consistency with stored rules/warnings, conflicts, updates
+5. **Suggested Experiments**: Specific follow-up tests with hypotheses and success criteria
+6. **Conclusion**: Assessment of promise/fragility and critical takeaways
+
+**Template**: `src/prompts/auditorPrompt.ts` → `buildAuditPrompt(runSummary, memorySummary)`
+
+**Summary Helpers**: `src/lib/auditSummaries.ts`
+- `buildRunSummary(run)`: Compact run details (strategy, params, metrics, curve summary)
+- `buildMemorySummary(notes)`: Grouped notes (rules/warnings, insights) with type/importance
+
+**Integration**: Command calls `chat` edge function with audit prompt; Chief Quant base identity + memory context + audit instructions → structured analysis returned to chat
+
+---
+
 ### `backtest-run`
 
 **Endpoint**: `POST /functions/v1/backtest-run`
@@ -573,6 +605,33 @@ All commands are parsed and executed in `ChatArea.tsx` before sending to LLM.
      - "Best performer" highlights (best CAGR, best Sharpe, lowest Max DD)
   6. Display in chat as system message
   7. Hint user to use Quant tab for visual comparison
+
+#### `/audit_run N` or `/audit_run id:<runId>`
+- **Description**: Perform deep Strategy Auditor analysis of a completed backtest run
+- **Usage**:
+  - `/audit_run 1` (audit most recent completed run)
+  - `/audit_run 3` (audit 3rd most recent completed run)
+  - `/audit_run id:abc-123-def` (audit specific run by ID)
+- **Behavior**:
+  1. Parse argument: 1-based index OR `id:<uuid>`
+  2. Fetch the specified completed run from `backtest_runs`
+  3. Fetch relevant memory notes:
+     - Run-linked notes (`run_id = this run`)
+     - Strategy-tagged notes (`tags` contains `strategy_key`)
+     - High/critical importance rules/warnings
+  4. Build structured summaries:
+     - `buildRunSummary(run)`: params, metrics, equity curve summary
+     - `buildMemorySummary(notes)`: grouped by type/importance
+  5. Build audit prompt using Chief Quant Auditor mode template
+  6. Call `chat` edge function with audit prompt
+  7. Return structured analysis with sections:
+     - Quick Overview
+     - Structural Edge Assessment
+     - Failure Modes & Risks
+     - Rule & Memory Alignment
+     - Suggested Experiments
+     - Conclusion
+  8. Display audit result in chat as system message
 
 ### Command Autocomplete
 
@@ -926,7 +985,7 @@ supabase functions serve
 - [ ] Filter memory by type/importance
 - [ ] Verify memory appears in chat context (check for rules/warnings in responses)
 - [ ] Switch workspaces, verify data isolation
-- [ ] Test all slash commands: `/help`, `/backtest`, `/runs`, `/note`, `/compare`
+- [ ] Test all slash commands: `/help`, `/backtest`, `/runs`, `/note`, `/compare`, `/audit_run`
 
 ### Edge Function Logs
 

@@ -5,6 +5,8 @@
 
 import { supabase } from '@/integrations/supabase/client';
 import type { BacktestRun, BacktestParams, BacktestMetrics } from '@/types/backtest';
+import { buildAuditPrompt } from '@/prompts/auditorPrompt';
+import { buildRunSummary, buildMemorySummary, type MemoryNote } from '@/lib/auditSummaries';
 
 export interface CommandResult {
   success: boolean;
@@ -407,6 +409,145 @@ async function handleCompare(args: string, context: CommandContext): Promise<Com
 }
 
 /**
+ * /audit_run command - perform deep analysis of a completed run
+ * Usage: /audit_run N or /audit_run id:<runId>
+ * Examples:
+ *   /audit_run 1  (audit most recent completed run)
+ *   /audit_run id:abc-123-def
+ */
+async function handleAuditRun(args: string, context: CommandContext): Promise<CommandResult> {
+  const trimmed = args.trim();
+  
+  if (!trimmed) {
+    return {
+      success: false,
+      message: 'Usage: /audit_run N or /audit_run id:<runId>\nExample: /audit_run 1',
+    };
+  }
+
+  try {
+    let run: BacktestRun | null = null;
+    
+    // Parse argument: either "id:<uuid>" or a 1-based index
+    if (trimmed.startsWith('id:')) {
+      const runId = trimmed.slice(3).trim();
+      const { data, error } = await supabase
+        .from('backtest_runs')
+        .select('*')
+        .eq('id', runId)
+        .eq('session_id', context.sessionId)
+        .eq('status', 'completed')
+        .single();
+      
+      if (error || !data) {
+        return {
+          success: false,
+          message: `❌ No completed run found with ID: ${runId}`,
+        };
+      }
+      
+      run = data as BacktestRun;
+    } else {
+      // Parse as 1-based index
+      const index = parseInt(trimmed, 10);
+      if (isNaN(index) || index < 1) {
+        return {
+          success: false,
+          message: 'Invalid index. Use a positive number (1, 2, 3...) or id:<runId>',
+        };
+      }
+      
+      // Fetch recent completed runs
+      const { data, error } = await supabase
+        .from('backtest_runs')
+        .select('*')
+        .eq('session_id', context.sessionId)
+        .eq('status', 'completed')
+        .order('completed_at', { ascending: false })
+        .limit(20);
+      
+      if (error || !data || data.length === 0) {
+        return {
+          success: false,
+          message: '❌ No completed runs found for this session',
+        };
+      }
+      
+      if (index > data.length) {
+        return {
+          success: false,
+          message: `❌ Index ${index} out of range. Only ${data.length} completed run(s) available.`,
+        };
+      }
+      
+      run = data[index - 1] as BacktestRun;
+    }
+    
+    if (!run) {
+      return {
+        success: false,
+        message: '❌ Could not find the specified run',
+      };
+    }
+    
+    // Fetch relevant memory notes
+    // Priority: run-linked notes, then strategy-tagged notes, then general high-importance
+    const { data: memoryData, error: memoryError } = await supabase
+      .from('memory_notes')
+      .select('*')
+      .eq('workspace_id', context.workspaceId)
+      .eq('archived', false)
+      .or(`run_id.eq.${run.id},tags.cs.{${run.strategy_key}}`)
+      .order('importance', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(20);
+    
+    const memoryNotes: MemoryNote[] = memoryData || [];
+    
+    // Build summaries
+    const runSummary = buildRunSummary(run);
+    const memorySummary = buildMemorySummary(memoryNotes);
+    
+    // Build audit prompt
+    const auditPrompt = buildAuditPrompt(runSummary, memorySummary);
+    
+    // Call chat function with audit prompt
+    const { data: chatData, error: chatError } = await supabase.functions.invoke('chat', {
+      body: {
+        sessionId: context.sessionId,
+        workspaceId: context.workspaceId,
+        content: auditPrompt,
+      },
+    });
+    
+    if (chatError) {
+      throw chatError;
+    }
+    
+    if (!chatData || !chatData.message) {
+      throw new Error('No response from chat function');
+    }
+    
+    // Return the audit analysis
+    return {
+      success: true,
+      message: `🔍 **Strategy Audit: ${run.strategy_key}**\n\n${chatData.message}`,
+      data: {
+        runId: run.id,
+        strategyKey: run.strategy_key,
+        auditResponse: chatData.message,
+      },
+    };
+  } catch (error: any) {
+    console.error('Audit run command error:', error);
+    return {
+      success: false,
+      message: `❌ Failed to audit run: ${error.message || 'Unknown error'}`,
+    };
+  }
+}
+
+/**
  * /help command - show available commands
  */
 async function handleHelp(): Promise<CommandResult> {
@@ -422,6 +563,9 @@ async function handleHelp(): Promise<CommandResult> {
       `📊 /compare [N]\n` +
       `   Compare N most recent completed runs (2-5, default: 2)\n` +
       `   Example: /compare 3\n\n` +
+      `🔍 /audit_run N or /audit_run id:<runId>\n` +
+      `   Perform deep Strategy Auditor analysis of a completed run\n` +
+      `   Example: /audit_run 1 or /audit_run id:abc-123-def\n\n` +
       `💡 /note <content> [type:TYPE] [importance:LEVEL] [tags:tag1,tag2]\n` +
       `   Create a memory note\n` +
       `   Example: /note This fails in bear markets type:warning importance:high\n\n` +
@@ -451,6 +595,12 @@ const commands: Record<string, Command> = {
     description: 'Compare recent completed runs',
     usage: '/compare [N]',
     handler: handleCompare,
+  },
+  audit_run: {
+    name: 'audit_run',
+    description: 'Audit a completed backtest run',
+    usage: '/audit_run N or /audit_run id:<runId>',
+    handler: handleAuditRun,
   },
   note: {
     name: 'note',
