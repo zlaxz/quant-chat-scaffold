@@ -5,7 +5,8 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card } from '@/components/ui/card';
-import { Loader2, TrendingUp, Send } from 'lucide-react';
+import { Badge } from '@/components/ui/badge';
+import { Loader2, TrendingUp, Send, Zap, Activity, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { useChatContext } from '@/contexts/ChatContext';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
@@ -26,6 +27,7 @@ interface BacktestRun {
   equity_curve: any[];
   started_at: string;
   completed_at: string | null;
+  engine_source?: string;
 }
 
 export const QuantPanel = () => {
@@ -131,7 +133,15 @@ export const QuantPanel = () => {
       if (error) throw error;
 
       setCurrentRun(data);
-      toast.success('Backtest completed successfully');
+      
+      // Show appropriate success message based on engine source
+      if (data.engine_source === 'external') {
+        toast.success('Backtest completed with live engine');
+      } else if (data.engine_source === 'stub_fallback') {
+        toast.warning('Backtest completed with stub (external engine unavailable)');
+      } else {
+        toast.success('Backtest completed');
+      }
     } catch (error: any) {
       console.error('Error running backtest:', error);
       toast.error(error.message || 'Failed to run backtest');
@@ -286,7 +296,27 @@ Final Equity: $${currentRun.equity_curve[currentRun.equity_curve.length - 1].val
       {currentRun && currentRun.status === 'completed' && (
         <div className="space-y-4 pt-4 border-t border-border">
           <div className="flex items-center justify-between">
-            <h4 className="text-xs font-semibold font-mono">Results</h4>
+            <div className="flex items-center gap-2">
+              <h4 className="text-xs font-semibold font-mono">Results</h4>
+              {currentRun.engine_source === 'external' && (
+                <Badge variant="default" className="h-5 text-[10px]">
+                  <Zap className="h-2.5 w-2.5 mr-1" />
+                  Live Engine
+                </Badge>
+              )}
+              {currentRun.engine_source === 'stub' && (
+                <Badge variant="secondary" className="h-5 text-[10px]">
+                  <Activity className="h-2.5 w-2.5 mr-1" />
+                  Stub
+                </Badge>
+              )}
+              {currentRun.engine_source === 'stub_fallback' && (
+                <Badge variant="outline" className="h-5 text-[10px] border-orange-500 text-orange-600">
+                  <AlertCircle className="h-2.5 w-2.5 mr-1" />
+                  Stub (Fallback)
+                </Badge>
+              )}
+            </div>
             <Button
               onClick={sendSummaryToChat}
               disabled={isSendingSummary}

@@ -17,9 +17,24 @@ interface BacktestRequest {
   };
 }
 
+interface ExternalEngineResponse {
+  metrics: {
+    cagr: number;
+    sharpe: number;
+    max_drawdown: number;
+    win_rate: number;
+    total_trades: number;
+    avg_trade_duration_days: number;
+  };
+  equity_curve: Array<{
+    date: string;
+    value: number;
+  }>;
+}
+
 /**
  * Generate deterministic fake backtest results
- * This is Phase 3 stub logic - real Python engine comes in Phase 4
+ * This is the fallback stub when external engine is unavailable
  */
 function generateFakeResults(strategyKey: string, params: any) {
   const seed = strategyKey.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
@@ -62,6 +77,87 @@ function generateFakeResults(strategyKey: string, params: any) {
   }
   
   return { metrics, equityCurve };
+}
+
+/**
+ * Call external backtest engine if configured
+ * Returns null if engine is not configured or call fails
+ */
+async function callExternalEngine(
+  strategyKey: string,
+  params: any
+): Promise<{ metrics: any; equityCurve: any; engineSource: string } | null> {
+  const engineUrl = Deno.env.get('BACKTEST_ENGINE_URL');
+  
+  if (!engineUrl || engineUrl.trim() === '') {
+    console.log('[External Engine] BACKTEST_ENGINE_URL not configured, using stub');
+    return null;
+  }
+
+  console.log('[External Engine] Attempting to call external engine:', engineUrl);
+
+  try {
+    const response = await fetch(`${engineUrl}/run-backtest`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        strategyKey,
+        params,
+      }),
+      signal: AbortSignal.timeout(30000), // 30 second timeout
+    });
+
+    if (!response.ok) {
+      console.error('[External Engine] Non-2xx response:', response.status, response.statusText);
+      return null;
+    }
+
+    const data: ExternalEngineResponse = await response.json();
+
+    // Validate response structure
+    if (!data.metrics || !data.equity_curve) {
+      console.error('[External Engine] Invalid response structure - missing metrics or equity_curve');
+      return null;
+    }
+
+    // Validate metrics fields
+    const requiredMetrics = ['cagr', 'sharpe', 'max_drawdown', 'win_rate', 'total_trades', 'avg_trade_duration_days'];
+    const hasAllMetrics = requiredMetrics.every(field => field in data.metrics);
+    
+    if (!hasAllMetrics) {
+      console.error('[External Engine] Invalid metrics structure, missing required fields');
+      return null;
+    }
+
+    // Validate equity curve is an array with date/value pairs
+    if (!Array.isArray(data.equity_curve) || data.equity_curve.length === 0) {
+      console.error('[External Engine] Invalid equity_curve - must be non-empty array');
+      return null;
+    }
+
+    const validCurve = data.equity_curve.every(
+      point => point.date && typeof point.value === 'number'
+    );
+
+    if (!validCurve) {
+      console.error('[External Engine] Invalid equity_curve format - missing date or value fields');
+      return null;
+    }
+
+    console.log('[External Engine] Successfully received and validated results');
+    
+    return {
+      metrics: data.metrics,
+      equityCurve: data.equity_curve,
+      engineSource: 'external',
+    };
+
+  } catch (error: any) {
+    console.error('[External Engine] Error calling external engine:', error.message);
+    return null;
+  }
 }
 
 serve(async (req) => {
@@ -109,12 +205,37 @@ serve(async (req) => {
 
     console.log('[Backtest Run] Created run:', backtestRun.id);
 
-    // 2. Generate fake results (stub logic)
-    console.log('[Backtest Run] Generating fake results...');
-    const { metrics, equityCurve } = generateFakeResults(strategyKey, params);
+    // 2. Try external engine first, fall back to stub
+    let metrics, equityCurve, engineSource;
+
+    const externalResult = await callExternalEngine(strategyKey, params);
+    
+    if (externalResult) {
+      // External engine succeeded
+      metrics = externalResult.metrics;
+      equityCurve = externalResult.equityCurve;
+      engineSource = externalResult.engineSource;
+      console.log('[Backtest Run] Using external engine results');
+    } else {
+      // Fall back to stub
+      const engineUrl = Deno.env.get('BACKTEST_ENGINE_URL');
+      if (engineUrl && engineUrl.trim() !== '') {
+        // External engine was configured but failed
+        console.log('[Backtest Run] External engine failed, falling back to stub');
+        engineSource = 'stub_fallback';
+      } else {
+        // External engine not configured
+        console.log('[Backtest Run] Using stub (no external engine configured)');
+        engineSource = 'stub';
+      }
+      
+      const stubResults = generateFakeResults(strategyKey, params);
+      metrics = stubResults.metrics;
+      equityCurve = stubResults.equityCurve;
+    }
 
     // 3. Update record with results
-    console.log('[Backtest Run] Updating with results...');
+    console.log('[Backtest Run] Updating with results, engine source:', engineSource);
     const { data: completedRun, error: updateError } = await supabase
       .from('backtest_runs')
       .update({
@@ -122,6 +243,7 @@ serve(async (req) => {
         completed_at: new Date().toISOString(),
         metrics,
         equity_curve: equityCurve,
+        engine_source: engineSource,
       })
       .eq('id', backtestRun.id)
       .select()
