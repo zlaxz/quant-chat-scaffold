@@ -76,12 +76,13 @@ Version 1.0 is considered complete when:
 - **Status Polling**: Handle long-running backtests with status updates (if needed)
 - **Error Reporting**: Surface engine errors clearly in UI
 
-### Stage 2: Memory Hardening & Retrieval Quality
-- **Embedding Reliability**: Ensure embeddings always generate for new notes (retry logic if OpenAI API fails)
-- **Retrieval Tuning**: Adjust similarity thresholds and match counts based on real usage
-- **Memory Editing**: Allow updating type, importance, content, and tags of existing notes
-- **Memory Archiving**: Add archived flag to keep active memory focused
-- **Rule Enforcement**: Test that critical rules/warnings consistently appear in chat context
+### Stage 2: Memory Hardening & Retrieval Quality ✅
+- ✅ **Embedding Reliability**: Embeddings generated on create/edit with fallback to previous embedding on failure
+- ✅ **Memory Editing**: Full edit support for content, type, importance, and tags with embedding regeneration
+- ✅ **Memory Archiving**: Archive/unarchive functionality with separate active/archived views
+- ✅ **Chat Retrieval Filtering**: Only active (non-archived) notes with embeddings used in chat context
+- ⬜ **Retrieval Tuning**: Adjust similarity thresholds and match counts based on real usage
+- ⬜ **Rule Enforcement**: Test that critical rules/warnings consistently appear in chat context
 
 ### Stage 3: Chief Quant Identity & Agent Modes
 - **Chief Quant Persona**: Define specialized system prompt with quant research expertise and memory awareness

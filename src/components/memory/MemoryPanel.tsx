@@ -7,12 +7,13 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { Brain, Plus, ExternalLink, Loader2, Search, X } from 'lucide-react';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
+import { Brain, Plus, ExternalLink, Loader2, Search, X, Edit2, Archive, ArchiveRestore } from 'lucide-react';
 import { toast } from 'sonner';
 import { useChatContext } from '@/contexts/ChatContext';
 import { format } from 'date-fns';
-
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface MemoryNote {
   id: string;
@@ -21,10 +22,12 @@ interface MemoryNote {
   source: string;
   tags: string[];
   created_at: string;
+  updated_at?: string;
   run_id: string | null;
   metadata: any;
   memory_type: string;
   importance: string;
+  archived: boolean;
 }
 
 interface MemoryPanelProps {
@@ -46,18 +49,26 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
   const [hasSearched, setHasSearched] = useState(false);
   const [filterType, setFilterType] = useState('all');
   const [filterImportance, setFilterImportance] = useState('all');
+  const [viewMode, setViewMode] = useState<'active' | 'archived'>('active');
+  
+  // Edit state
+  const [editingNote, setEditingNote] = useState<MemoryNote | null>(null);
+  const [editContent, setEditContent] = useState('');
+  const [editTags, setEditTags] = useState('');
+  const [editType, setEditType] = useState('insight');
+  const [editImportance, setEditImportance] = useState('normal');
+  const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
     if (selectedWorkspaceId) {
       loadMemoryNotes();
-      // Reset filters when workspace changes
       setFilterType('all');
       setFilterImportance('all');
       setHasSearched(false);
       setSearchQuery('');
       setSearchResults([]);
     }
-  }, [selectedWorkspaceId]);
+  }, [selectedWorkspaceId, viewMode]);
 
   const loadMemoryNotes = async () => {
     if (!selectedWorkspaceId) return;
@@ -68,6 +79,7 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
         .from('memory_notes')
         .select('*')
         .eq('workspace_id', selectedWorkspaceId)
+        .eq('archived', viewMode === 'archived')
         .order('created_at', { ascending: false })
         .limit(50);
 
@@ -95,7 +107,6 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
         .map(t => t.trim())
         .filter(t => t.length > 0);
 
-      // Use the memory-create edge function to generate embeddings
       const { error } = await supabase.functions.invoke('memory-create', {
         body: {
           workspaceId: selectedWorkspaceId,
@@ -109,7 +120,7 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
 
       if (error) throw error;
 
-      toast.success('Memory note saved with embedding');
+      toast.success('Memory note saved');
       setNewNoteContent('');
       setNewNoteTags('');
       setNewNoteType('insight');
@@ -120,6 +131,77 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
       toast.error('Failed to save memory note');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const startEdit = (note: MemoryNote) => {
+    setEditingNote(note);
+    setEditContent(note.content);
+    setEditTags((note.tags || []).join(', '));
+    setEditType(note.memory_type || 'insight');
+    setEditImportance(note.importance || 'normal');
+  };
+
+  const cancelEdit = () => {
+    setEditingNote(null);
+    setEditContent('');
+    setEditTags('');
+    setEditType('insight');
+    setEditImportance('normal');
+  };
+
+  const saveEdit = async () => {
+    if (!editingNote || !editContent.trim()) {
+      toast.error('Please enter note content');
+      return;
+    }
+
+    setIsUpdating(true);
+    try {
+      const tags = editTags
+        .split(',')
+        .map(t => t.trim())
+        .filter(t => t.length > 0);
+
+      const { error } = await supabase.functions.invoke('memory-update', {
+        body: {
+          noteId: editingNote.id,
+          content: editContent.trim(),
+          memoryType: editType,
+          importance: editImportance,
+          tags,
+        },
+      });
+
+      if (error) throw error;
+
+      toast.success('Memory note updated');
+      cancelEdit();
+      await loadMemoryNotes();
+    } catch (error: any) {
+      console.error('Error updating memory note:', error);
+      toast.error('Failed to update memory note');
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  const toggleArchive = async (note: MemoryNote) => {
+    try {
+      const { error } = await supabase.functions.invoke('memory-update', {
+        body: {
+          noteId: note.id,
+          archived: !note.archived,
+        },
+      });
+
+      if (error) throw error;
+
+      toast.success(note.archived ? 'Note restored' : 'Note archived');
+      await loadMemoryNotes();
+    } catch (error: any) {
+      console.error('Error toggling archive:', error);
+      toast.error('Failed to update note');
     }
   };
 
@@ -250,7 +332,7 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
           <div className="p-4 bg-muted rounded-md text-center">
             <p className="text-xs text-muted-foreground">
               {notes.length === 0 
-                ? (hasSearched ? 'No matching memory found' : 'No memory stored for this workspace yet')
+                ? (hasSearched ? 'No matching memory found' : `No ${viewMode} memory notes`)
                 : 'No notes match the selected filters'}
             </p>
           </div>
@@ -268,19 +350,48 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
                       <span className="text-[10px] text-muted-foreground">
                         {format(new Date(note.created_at), 'MMM d, yyyy HH:mm')}
                       </span>
+                      {note.updated_at && note.updated_at !== note.created_at && (
+                        <span className="text-[10px] text-muted-foreground italic">
+                          (edited)
+                        </span>
+                      )}
                     </div>
                   </div>
-                  {note.run_id && onViewRun && (
+                  <div className="flex gap-1">
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-6 text-[10px]"
-                      onClick={() => onViewRun(note.run_id!)}
+                      className="h-6 w-6 p-0"
+                      onClick={() => startEdit(note)}
+                      title="Edit note"
                     >
-                      <ExternalLink className="h-3 w-3 mr-1" />
-                      View Run
+                      <Edit2 className="h-3 w-3" />
                     </Button>
-                  )}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0"
+                      onClick={() => toggleArchive(note)}
+                      title={note.archived ? 'Restore note' : 'Archive note'}
+                    >
+                      {note.archived ? (
+                        <ArchiveRestore className="h-3 w-3" />
+                      ) : (
+                        <Archive className="h-3 w-3" />
+                      )}
+                    </Button>
+                    {note.run_id && onViewRun && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0"
+                        onClick={() => onViewRun(note.run_id!)}
+                        title="View run"
+                      >
+                        <ExternalLink className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 {note.tags && note.tags.length > 0 && (
                   <div className="flex flex-wrap gap-1">
@@ -301,179 +412,279 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h3 className="text-sm font-semibold font-mono mb-2">Memory Notes</h3>
-        <p className="text-xs text-muted-foreground mb-4">
-          Persistent notes and insights for this workspace
-        </p>
+      <div className="flex items-center gap-2">
+        <Brain className="h-4 w-4" />
+        <h3 className="text-sm font-semibold">Workspace Memory</h3>
       </div>
 
-      {/* Add Note Form */}
-      <Card className="p-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <Brain className="h-4 w-4 text-primary" />
-          <h4 className="text-xs font-semibold font-mono">Add Memory Note</h4>
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="note-content" className="text-xs font-mono">Content</Label>
-          <Textarea
-            id="note-content"
-            value={newNoteContent}
-            onChange={(e) => setNewNoteContent(e.target.value)}
-            placeholder="Enter your insight or note..."
-            className="text-xs min-h-[80px]"
-          />
-        </div>
-        <div className="space-y-2">
-          <Label htmlFor="note-tags" className="text-xs font-mono">Tags (comma separated)</Label>
-          <Input
-            id="note-tags"
-            value={newNoteTags}
-            onChange={(e) => setNewNoteTags(e.target.value)}
-            placeholder="momentum, volatility, regime-change..."
-            className="text-xs"
-          />
-        </div>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="space-y-2">
-            <Label htmlFor="note-type" className="text-xs font-mono">Type</Label>
-            <Select value={newNoteType} onValueChange={setNewNoteType}>
-              <SelectTrigger id="note-type" className="text-xs h-8">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="insight">Insight</SelectItem>
-                <SelectItem value="rule">Rule</SelectItem>
-                <SelectItem value="warning">Warning</SelectItem>
-                <SelectItem value="todo">Todo</SelectItem>
-                <SelectItem value="bug">Bug</SelectItem>
-                <SelectItem value="profile_change">Profile Change</SelectItem>
-              </SelectContent>
-            </Select>
+      {selectedWorkspaceId ? (
+        <>
+          {/* Add Memory Note */}
+          <Card className="p-4 space-y-3">
+            <h4 className="text-xs font-semibold font-mono">Add Memory Note</h4>
+            <div className="space-y-2">
+              <div>
+                <Label htmlFor="note-content" className="text-xs">Content</Label>
+                <Textarea
+                  id="note-content"
+                  placeholder="Describe the insight, rule, or observation..."
+                  value={newNoteContent}
+                  onChange={(e) => setNewNoteContent(e.target.value)}
+                  className="text-xs min-h-[60px]"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label htmlFor="note-type" className="text-xs">Type</Label>
+                  <Select value={newNoteType} onValueChange={setNewNoteType}>
+                    <SelectTrigger id="note-type" className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="insight">Insight</SelectItem>
+                      <SelectItem value="rule">Rule</SelectItem>
+                      <SelectItem value="warning">Warning</SelectItem>
+                      <SelectItem value="todo">Todo</SelectItem>
+                      <SelectItem value="bug">Bug</SelectItem>
+                      <SelectItem value="profile_change">Profile Change</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label htmlFor="note-importance" className="text-xs">Importance</Label>
+                  <Select value={newNoteImportance} onValueChange={setNewNoteImportance}>
+                    <SelectTrigger id="note-importance" className="h-8 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="low">Low</SelectItem>
+                      <SelectItem value="normal">Normal</SelectItem>
+                      <SelectItem value="high">High</SelectItem>
+                      <SelectItem value="critical">Critical</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="note-tags" className="text-xs">Tags (comma-separated)</Label>
+                <Input
+                  id="note-tags"
+                  placeholder="momentum, trend, volatility"
+                  value={newNoteTags}
+                  onChange={(e) => setNewNoteTags(e.target.value)}
+                  className="h-8 text-xs"
+                />
+              </div>
+
+              <Button
+                onClick={saveMemoryNote}
+                disabled={isSaving || !newNoteContent.trim()}
+                className="w-full h-8 text-xs"
+              >
+                {isSaving ? (
+                  <>
+                    <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  <>
+                    <Plus className="h-3 w-3 mr-2" />
+                    Save Memory
+                  </>
+                )}
+              </Button>
+            </div>
+          </Card>
+
+          <Separator />
+
+          {/* Semantic Search */}
+          <Card className="p-4 space-y-3">
+            <h4 className="text-xs font-semibold font-mono">Semantic Search</h4>
+            <div className="flex gap-2">
+              <Input
+                placeholder="Search memory semantically..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    performSemanticSearch();
+                  }
+                }}
+                className="text-xs h-8"
+              />
+              <Button
+                onClick={performSemanticSearch}
+                disabled={isSearching || !searchQuery.trim()}
+                size="sm"
+                className="h-8"
+              >
+                {isSearching ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  <Search className="h-3 w-3" />
+                )}
+              </Button>
+            </div>
+          </Card>
+
+          <Separator />
+
+          {/* Filters */}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <Label className="text-xs">Filter by Type</Label>
+              <Select value={filterType} onValueChange={setFilterType}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="insight">Insight</SelectItem>
+                  <SelectItem value="rule">Rule</SelectItem>
+                  <SelectItem value="warning">Warning</SelectItem>
+                  <SelectItem value="todo">Todo</SelectItem>
+                  <SelectItem value="bug">Bug</SelectItem>
+                  <SelectItem value="profile_change">Profile Change</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label className="text-xs">Filter by Importance</Label>
+              <Select value={filterImportance} onValueChange={setFilterImportance}>
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="high-critical">High + Critical</SelectItem>
+                  <SelectItem value="critical">Critical Only</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="normal">Normal</SelectItem>
+                  <SelectItem value="low">Low</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="note-importance" className="text-xs font-mono">Importance</Label>
-            <Select value={newNoteImportance} onValueChange={setNewNoteImportance}>
-              <SelectTrigger id="note-importance" className="text-xs h-8">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="low">Low</SelectItem>
-                <SelectItem value="normal">Normal</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="critical">Critical</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-        <Button
-          onClick={saveMemoryNote}
-          disabled={isSaving || !newNoteContent.trim() || !selectedWorkspaceId}
-          size="sm"
-          className="w-full"
-        >
-          {isSaving ? (
-            <>
-              <Loader2 className="mr-2 h-3 w-3 animate-spin" />
-              Saving...
-            </>
-          ) : (
-            <>
-              <Plus className="mr-2 h-3 w-3" />
-              Add Note
-            </>
-          )}
-        </Button>
-      </Card>
 
-      <Separator />
+          <Separator />
 
-      {/* Semantic Search */}
-      <Card className="p-4 space-y-3">
-        <div className="flex items-center gap-2">
-          <Search className="h-4 w-4 text-primary" />
-          <h4 className="text-xs font-semibold font-mono">Search Memory Semantically</h4>
-        </div>
-        <div className="flex gap-2">
-          <Input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            onKeyPress={(e) => e.key === 'Enter' && performSemanticSearch()}
-            placeholder="Search by concept or topic..."
-            className="text-xs flex-1"
-            disabled={!selectedWorkspaceId}
-          />
-          <Button
-            onClick={performSemanticSearch}
-            disabled={isSearching || !searchQuery.trim() || !selectedWorkspaceId}
-            size="sm"
-          >
-            {isSearching ? (
-              <Loader2 className="h-3 w-3 animate-spin" />
-            ) : (
-              <Search className="h-3 w-3" />
-            )}
-          </Button>
-        </div>
-      </Card>
+          {/* Memory Notes with Tabs */}
+          <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as 'active' | 'archived')}>
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="active" className="text-xs">Active Notes</TabsTrigger>
+              <TabsTrigger value="archived" className="text-xs">Archived</TabsTrigger>
+            </TabsList>
+            
+            <TabsContent value="active" className="mt-4">
+              {isLoading ? (
+                <div className="p-4 text-center">
+                  <Loader2 className="h-4 w-4 animate-spin mx-auto" />
+                </div>
+              ) : hasSearched ? (
+                renderMemoryList(searchResults, `Search Results (${searchResults.length})`)
+              ) : (
+                renderMemoryList(memoryNotes, `Recent Active Notes (${memoryNotes.length})`)
+              )}
+            </TabsContent>
+            
+            <TabsContent value="archived" className="mt-4">
+              {isLoading ? (
+                <div className="p-4 text-center">
+                  <Loader2 className="h-4 w-4 animate-spin mx-auto" />
+                </div>
+              ) : (
+                renderMemoryList(memoryNotes, `Archived Notes (${memoryNotes.length})`)
+              )}
+            </TabsContent>
+          </Tabs>
 
-      <Separator />
+          {/* Edit Dialog */}
+          <Dialog open={!!editingNote} onOpenChange={(open) => !open && cancelEdit()}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>Edit Memory Note</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div>
+                  <Label htmlFor="edit-content" className="text-xs">Content</Label>
+                  <Textarea
+                    id="edit-content"
+                    value={editContent}
+                    onChange={(e) => setEditContent(e.target.value)}
+                    className="text-xs min-h-[80px]"
+                  />
+                </div>
 
-      {/* Filters */}
-      <Card className="p-4 space-y-3">
-        <h4 className="text-xs font-semibold font-mono">Filters</h4>
-        <div className="grid grid-cols-2 gap-2">
-          <div className="space-y-2">
-            <Label className="text-xs font-mono">Memory Type</Label>
-            <Select value={filterType} onValueChange={setFilterType}>
-              <SelectTrigger className="text-xs h-8">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Types</SelectItem>
-                <SelectItem value="insight">Insight</SelectItem>
-                <SelectItem value="rule">Rule</SelectItem>
-                <SelectItem value="warning">Warning</SelectItem>
-                <SelectItem value="todo">Todo</SelectItem>
-                <SelectItem value="bug">Bug</SelectItem>
-                <SelectItem value="profile_change">Profile Change</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-2">
-            <Label className="text-xs font-mono">Importance</Label>
-            <Select value={filterImportance} onValueChange={setFilterImportance}>
-              <SelectTrigger className="text-xs h-8">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Levels</SelectItem>
-                <SelectItem value="high-critical">High + Critical</SelectItem>
-                <SelectItem value="critical">Critical Only</SelectItem>
-                <SelectItem value="high">High Only</SelectItem>
-                <SelectItem value="normal">Normal Only</SelectItem>
-                <SelectItem value="low">Low Only</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
-      </Card>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <Label htmlFor="edit-type" className="text-xs">Type</Label>
+                    <Select value={editType} onValueChange={setEditType}>
+                      <SelectTrigger id="edit-type" className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="insight">Insight</SelectItem>
+                        <SelectItem value="rule">Rule</SelectItem>
+                        <SelectItem value="warning">Warning</SelectItem>
+                        <SelectItem value="todo">Todo</SelectItem>
+                        <SelectItem value="bug">Bug</SelectItem>
+                        <SelectItem value="profile_change">Profile Change</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-      <Separator />
+                  <div>
+                    <Label htmlFor="edit-importance" className="text-xs">Importance</Label>
+                    <Select value={editImportance} onValueChange={setEditImportance}>
+                      <SelectTrigger id="edit-importance" className="h-8 text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="low">Low</SelectItem>
+                        <SelectItem value="normal">Normal</SelectItem>
+                        <SelectItem value="high">High</SelectItem>
+                        <SelectItem value="critical">Critical</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
 
-      {/* Memory Notes List */}
-      {isLoading ? (
-        <div className="flex items-center justify-center p-8">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-        </div>
-      ) : hasSearched ? (
-        renderMemoryList(searchResults, 'Search Results')
+                <div>
+                  <Label htmlFor="edit-tags" className="text-xs">Tags (comma-separated)</Label>
+                  <Input
+                    id="edit-tags"
+                    value={editTags}
+                    onChange={(e) => setEditTags(e.target.value)}
+                    className="h-8 text-xs"
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={cancelEdit} className="text-xs">
+                  Cancel
+                </Button>
+                <Button onClick={saveEdit} disabled={isUpdating || !editContent.trim()} className="text-xs">
+                  {isUpdating ? (
+                    <>
+                      <Loader2 className="h-3 w-3 mr-2 animate-spin" />
+                      Saving...
+                    </>
+                  ) : (
+                    'Save Changes'
+                  )}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        </>
       ) : (
-        renderMemoryList(memoryNotes, 'Recent Notes')
-      )}
-
-      {!selectedWorkspaceId && (
-        <div className="p-4 bg-muted/50 rounded-md text-center">
+        <div className="p-4 bg-muted rounded-md text-center">
           <p className="text-xs text-muted-foreground">
             Select a workspace to view memory notes
           </p>

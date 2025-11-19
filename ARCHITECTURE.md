@@ -177,7 +177,9 @@ importance    text DEFAULT 'normal'                  -- 'low', 'normal', 'high',
 tags          text[]                                 -- array of user-defined tags
 embedding     vector(1536)                           -- OpenAI text-embedding-3-small
 metadata      jsonb DEFAULT '{}'                     -- extensible metadata
+archived      boolean DEFAULT false                  -- archived notes excluded from chat/search
 created_at    timestamp with time zone DEFAULT now()
+updated_at    timestamp with time zone DEFAULT now() -- auto-updated via trigger
 ```
 
 **Indexes**:
@@ -186,6 +188,10 @@ created_at    timestamp with time zone DEFAULT now()
 - `idx_memory_notes_embedding` using `ivfflat` (vector similarity)
 - `idx_memory_notes_memory_type` on `memory_type`
 - `idx_memory_notes_importance` on `importance`
+- `idx_memory_notes_archived` on `archived`
+
+**Triggers**:
+- `update_memory_notes_updated_at` — auto-updates `updated_at` on row modification
 
 **Extensions**:
 - `vector` (pgvector) for embedding storage and similarity search
@@ -245,6 +251,7 @@ All edge functions run on Supabase Edge Functions (Deno runtime) and are configu
 4. **Memory Retrieval**:
    - Generate embedding for user's message using OpenAI embeddings API
    - Call `search_memory_notes` RPC function with embedding
+   - Only retrieves **active (non-archived) notes with embeddings**
    - Retrieve top 5–15 semantically similar notes
    - **Prioritize**: critical/high importance rules and warnings
    - Format into system prompt sections:
@@ -415,6 +422,44 @@ All edge functions run on Supabase Edge Functions (Deno runtime) and are configu
 
 **Error Handling**:
 - If embedding generation fails: log error, insert note with `embedding=null` (note still saved)
+- Validation errors: return 400
+
+**CORS**: Enabled
+
+**JWT Verification**: Disabled
+
+---
+
+### `memory-update`
+
+**Endpoint**: `POST /functions/v1/memory-update`
+
+**Request Body**:
+```json
+{
+  "noteId": "uuid",
+  "content": "updated text",
+  "memoryType": "rule",
+  "importance": "high",
+  "tags": ["tag1", "tag2"],
+  "archived": false
+}
+```
+
+**Behavior**:
+1. Initialize Supabase client
+2. Fetch existing note to get previous embedding
+3. Validate `memoryType` and `importance` if provided
+4. If `content` changed:
+   - Attempt to regenerate embedding
+   - If embedding generation fails: keep previous embedding (if exists)
+5. Update row in `memory_notes` with new values
+6. `updated_at` auto-updated by trigger
+7. Return updated note
+
+**Error Handling**:
+- If note not found: return 404
+- If embedding regeneration fails: log warning, keep previous embedding
 - Validation errors: return 400
 
 **CORS**: Enabled

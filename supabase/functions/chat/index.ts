@@ -126,6 +126,7 @@ serve(async (req) => {
     
     if (queryEmbedding) {
       // Use semantic search via the database function (fetch more than needed for re-ranking)
+      // Only active (non-archived) notes with embeddings are returned
       const { data: semanticResults, error: memoryError } = await supabase.rpc('search_memory_notes', {
         query_embedding: queryEmbedding,
         match_workspace_id: workspaceId,
@@ -136,7 +137,8 @@ serve(async (req) => {
       if (memoryError) {
         console.error('[Chat API] Error in semantic memory search:', memoryError);
       } else {
-        const results = semanticResults || [];
+        // Filter archived notes (additional safety check)
+        const results = (semanticResults || []).filter((n: any) => n.archived !== true);
         console.log(`[Chat API] Found ${results.length} relevant memory notes via semantic search`);
         
         // Prioritize rules and warnings, especially critical/high importance
@@ -167,6 +169,8 @@ serve(async (req) => {
         .from('memory_notes')
         .select('content, source, tags, created_at, memory_type, importance, similarity')
         .eq('workspace_id', workspaceId)
+        .eq('archived', false) // Only active notes
+        .not('embedding', 'is', null) // Only notes with embeddings
         .gte('created_at', thirtyDaysAgo.toISOString())
         .order('created_at', { ascending: false })
         .limit(10);

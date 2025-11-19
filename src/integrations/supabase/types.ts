@@ -107,6 +107,7 @@ export type Database = {
       }
       memory_notes: {
         Row: {
+          archived: boolean | null
           content: string
           created_at: string | null
           embedding: string | null
@@ -117,9 +118,11 @@ export type Database = {
           run_id: string | null
           source: string
           tags: string[] | null
+          updated_at: string | null
           workspace_id: string
         }
         Insert: {
+          archived?: boolean | null
           content: string
           created_at?: string | null
           embedding?: string | null
@@ -130,9 +133,11 @@ export type Database = {
           run_id?: string | null
           source?: string
           tags?: string[] | null
+          updated_at?: string | null
           workspace_id: string
         }
         Update: {
+          archived?: boolean | null
           content?: string
           created_at?: string | null
           embedding?: string | null
@@ -143,6 +148,7 @@ export type Database = {
           run_id?: string | null
           source?: string
           tags?: string[] | null
+          updated_at?: string | null
           workspace_id?: string
         }
         Relationships: [
