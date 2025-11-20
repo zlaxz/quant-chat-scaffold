@@ -977,6 +977,167 @@ async function handleRiskReview(args: string, context: CommandContext): Promise<
 }
 
 /**
+ * /open_file command - read rotation-engine file contents
+ * Usage: /open_file path:profiles/skew.py
+ */
+async function handleOpenFile(args: string, context: CommandContext): Promise<CommandResult> {
+  const pathMatch = args.match(/path:(\S+)/);
+  
+  if (!pathMatch) {
+    return {
+      success: false,
+      message: 'Usage: /open_file path:<path>\nExample: /open_file path:profiles/skew.py',
+    };
+  }
+
+  const path = pathMatch[1];
+
+  try {
+    const { data, error } = await supabase.functions.invoke('read-file', {
+      body: { path },
+    });
+
+    if (error) throw error;
+
+    if (!data || !data.content) {
+      throw new Error('No content returned from read-file');
+    }
+
+    return {
+      success: true,
+      message: `📄 **File: ${path}**\n\n\`\`\`\n${data.content}\n\`\`\``,
+      data: {
+        path,
+        content: data.content,
+      },
+    };
+  } catch (error: any) {
+    console.error('Open file command error:', error);
+    return {
+      success: false,
+      message: `❌ Failed to read file: ${error.message || 'Unknown error'}\n\n💡 Tip: Use /list_dir to explore available files.`,
+    };
+  }
+}
+
+/**
+ * /list_dir command - list rotation-engine directory contents
+ * Usage: /list_dir path:profiles OR /list_dir path:.
+ */
+async function handleListDir(args: string, context: CommandContext): Promise<CommandResult> {
+  const pathMatch = args.match(/path:(\S+)/);
+  const path = pathMatch ? pathMatch[1] : '.';
+
+  try {
+    const { data, error } = await supabase.functions.invoke('list-dir', {
+      body: { path },
+    });
+
+    if (error) throw error;
+
+    if (!data || !data.entries) {
+      throw new Error('No entries returned from list-dir');
+    }
+
+    const entries = data.entries as Array<{ name: string; type: string }>;
+
+    if (entries.length === 0) {
+      return {
+        success: true,
+        message: `📁 **Directory: ${path}**\n\n(empty)`,
+        data: { path, entries: [] },
+      };
+    }
+
+    const formatted = entries
+      .map(e => `  ${e.type === 'directory' ? '📁' : '📄'} ${e.name}`)
+      .join('\n');
+
+    return {
+      success: true,
+      message: `📁 **Directory: ${path}**\n\n${formatted}`,
+      data: {
+        path,
+        entries,
+      },
+    };
+  } catch (error: any) {
+    console.error('List dir command error:', error);
+    return {
+      success: false,
+      message: `❌ Failed to list directory: ${error.message || 'Unknown error'}`,
+    };
+  }
+}
+
+/**
+ * /search_code command - search rotation-engine code for terms
+ * Usage: /search_code peakless OR /search_code path:profiles peakless
+ */
+async function handleSearchCode(args: string, context: CommandContext): Promise<CommandResult> {
+  const pathMatch = args.match(/path:(\S+)/);
+  let query = args;
+  let path = '.';
+
+  if (pathMatch) {
+    path = pathMatch[1];
+    query = args.replace(/path:\S+\s*/, '').trim();
+  }
+
+  if (!query) {
+    return {
+      success: false,
+      message: 'Usage: /search_code <query> OR /search_code path:<path> <query>\nExample: /search_code peakless',
+    };
+  }
+
+  try {
+    const { data, error } = await supabase.functions.invoke('search-code', {
+      body: { query, path },
+    });
+
+    if (error) throw error;
+
+    if (!data || !data.results) {
+      throw new Error('No results returned from search-code');
+    }
+
+    const results = data.results as Array<{ file: string; line: number; context: string }>;
+
+    if (results.length === 0) {
+      return {
+        success: true,
+        message: `🔍 **Search: "${query}"** (in ${path})\n\nNo matches found.`,
+        data: { query, path, results: [] },
+      };
+    }
+
+    const formatted = results
+      .slice(0, 50) // Limit display to 50 results
+      .map((r, i) => `${i + 1}. **${r.file}:${r.line}**\n   \`${r.context}\``)
+      .join('\n\n');
+
+    const suffix = results.length > 50 ? `\n\n... and ${results.length - 50} more results` : '';
+
+    return {
+      success: true,
+      message: `🔍 **Search: "${query}"** (in ${path})\n\nFound ${results.length} match(es):\n\n${formatted}${suffix}`,
+      data: {
+        query,
+        path,
+        results,
+      },
+    };
+  } catch (error: any) {
+    console.error('Search code command error:', error);
+    return {
+      success: false,
+      message: `❌ Failed to search code: ${error.message || 'Unknown error'}`,
+    };
+  }
+}
+
+/**
  * /help command - show available commands
  */
 async function handleHelp(): Promise<CommandResult> {
@@ -1010,6 +1171,15 @@ async function handleHelp(): Promise<CommandResult> {
       `💡 /note <content> [type:TYPE] [importance:LEVEL] [tags:tag1,tag2]\n` +
       `   Create a memory note\n` +
       `   Example: /note This fails in bear markets type:warning importance:high\n\n` +
+      `📂 /list_dir path:<path>\n` +
+      `   List files and directories in rotation-engine\n` +
+      `   Example: /list_dir path:profiles or /list_dir path:.\n\n` +
+      `📄 /open_file path:<path>\n` +
+      `   Show contents of a rotation-engine file\n` +
+      `   Example: /open_file path:profiles/skew.py\n\n` +
+      `🔎 /search_code <query>\n` +
+      `   Search rotation-engine code for a term\n` +
+      `   Example: /search_code peakless or /search_code path:profiles convexity\n\n` +
       `❓ /help\n` +
       `   Show this help message`,
   };
@@ -1072,6 +1242,24 @@ const commands: Record<string, Command> = {
     description: 'Create a memory note',
     usage: '/note <content> [type:TYPE] [importance:LEVEL] [tags:tag1,tag2]',
     handler: handleNote,
+  },
+  list_dir: {
+    name: 'list_dir',
+    description: 'List files and directories in rotation-engine',
+    usage: '/list_dir path:<path>',
+    handler: handleListDir,
+  },
+  open_file: {
+    name: 'open_file',
+    description: 'Show contents of a rotation-engine file',
+    usage: '/open_file path:<path>',
+    handler: handleOpenFile,
+  },
+  search_code: {
+    name: 'search_code',
+    description: 'Search rotation-engine code for a term',
+    usage: '/search_code <query>',
+    handler: handleSearchCode,
   },
   help: {
     name: 'help',

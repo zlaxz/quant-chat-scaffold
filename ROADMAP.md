@@ -50,6 +50,12 @@
 - `/compare [N]` — Compare N recent completed runs (default 2, max 5)
 - `/audit_run N` or `/audit_run id:<runId>` — Deep analysis of a specific run (Strategy Auditor mode)
 - `/mine_patterns [limit]` — Detect patterns across runs (Pattern Miner mode, default 100 runs)
+- `/curate_memory` — Review and propose improvements to memory notes (Memory Curator mode)
+- `/suggest_experiments [focus]` — Propose next experiments (Experiment Director mode)
+- `/risk_review [focus]` — Review structural risk across runs (Risk Officer mode)
+- `/list_dir path:<path>` — List rotation-engine directory contents
+- `/open_file path:<path>` — Show rotation-engine file contents
+- `/search_code <query>` — Search rotation-engine code for terms
 
 ---
 
@@ -164,11 +170,19 @@ Version 1.0 is considered complete when:
 - ✅ **Integration**: Uses Chief Quant Risk Officer mode identity
 - ✅ **Minimum Data**: Requires at least 5 completed runs
 
-### Stage 9: Thin Local-Code Tools
-- **Repo Bridge**: Simple API bridge to local rotation-engine repo for reading code/configs
-- **Code Search**: `/code <query>` to search local repo from chat
-- **Config Preview**: Show current rotation-engine config in chat when discussing strategies
-- **Minimal Read-Only**: No git operations, just read access for context
+### Stage 9: Local Code Bridge (rotation-engine introspection) ✅
+- ✅ **Read-Only Code Access**: Three edge functions provide safe access to rotation-engine codebase:
+  - `read-file`: Read file contents (with 100KB truncation for large files)
+  - `list-dir`: List directory entries (sorted, directories first)
+  - `search-code`: Recursive code search (supports `.py`, `.js`, `.ts`, `.json`, `.yaml`, `.yml`, `.toml`, `.md`)
+- ✅ **Slash Commands**: `/list_dir path:<path>`, `/open_file path:<path>`, `/search_code <query>`
+- ✅ **Path Validation**: Blocks parent traversal (`..`) and absolute paths for security
+- ✅ **Smart Filtering**: Skips common non-code directories (`.git`, `__pycache__`, `node_modules`, `.venv`)
+- ✅ **Code-Aware Prompt Template**: `codeAwarePrompt.ts` for analyzing strategy code with Chief Quant
+- ✅ **Environment Configuration**: `ROTATION_ENGINE_ROOT` environment variable (default: `/rotation-engine`)
+- ✅ **Safety**: Completely read-only, no write or modification capabilities
+- ✅ **Performance**: Limits search results to 100 matches, truncates large files
+- ✅ **Integration Ready**: Can be integrated into agent modes (Auditor, Pattern Miner, etc.) for code-aware analysis
 
 ---
 
