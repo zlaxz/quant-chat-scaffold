@@ -279,6 +279,7 @@ This pattern can be reused for other multi-agent workflows (e.g., parallel patte
 - Phase 1: Tier routing infrastructure ✅
 - Phase 2: `chat-swarm-parallel` and `runSwarm` helper ✅
 - Phase 3: Red Team v2 using swarm + synthesis ✅
+- Phase 4: `/auto_analyze` v2 using swarm + synthesis ✅
 - Future: Different models per tier (e.g., Gemini 3 for PRIMARY, cheaper models for SWARM)
 
 ---
@@ -647,25 +648,33 @@ Activated by `/risk_review [focus]` command.
 
 ---
 
-### Autonomous Research Loop Mode (`/auto_analyze`)
+### Autonomous Research Loop Mode (`/auto_analyze`) — v2 with Swarm Orchestration
 
 Activated by `/auto_analyze [scope]` command.
 
-**Purpose**: Orchestrate all agent modes (Auditor, Pattern Miner, Curator, Experiment Director, Risk Officer) into a single comprehensive research report that synthesizes evidence across runs, memory, patterns, and risks.
+**Purpose**: Orchestrate all agent modes (Pattern Miner, Memory Curator, Risk Officer, Experiment Director) into a single comprehensive research report that synthesizes evidence across runs, memory, patterns, and risks.
 
-**Process**:
-1. Fetch up to 100 completed runs for current session
-2. Select 3-5 key runs for detailed analysis (best Sharpe, worst drawdown, most recent, outliers)
-3. Build portfolio summary of all runs
-4. Run Strategy Auditor on each key run
-5. Run Pattern Miner across all runs
-6. Run Memory Curator to review knowledge base health
-7. Run Risk Officer to identify structural vulnerabilities
-8. Run Experiment Director to propose next tests
-9. Assemble all outputs into unified analysis context
-10. Synthesize comprehensive research report with 8 sections
+**Architecture (v2 — Parallel Swarm + Synthesis)**:
 
-**Output Sections**:
+1. **Data Gathering**:
+   - Fetch 100 most recent completed runs for the session
+   - Fetch all non-archived memory notes for the workspace
+   - Build aggregated summaries for each agent type
+
+2. **Parallel Agent Execution via SWARM_MODEL**:
+   - **Pattern Miner Agent**: Detects recurring patterns across runs and memory
+   - **Memory Curator Agent**: Reviews memory quality and suggests improvements
+   - **Risk Officer Agent**: Identifies structural risks, rule violations, and vulnerabilities
+   - **Experiment Director Agent**: Proposes concrete next experiments
+
+   All agents execute in parallel via `runSwarm()` → `chat-swarm-parallel` → `chat-swarm`
+
+3. **Synthesis via PRIMARY_MODEL**:
+   - Combined agent outputs assembled into unified analysis input
+   - `chat-primary` synthesizes final Research Report using Autonomous Research Loop prompt
+   - Produces structured 8-section report
+
+**Output Sections (Final Report)**:
 - **Executive Summary**: Key findings overview (2-3 sentences)
 - **Key Observations (Data-Backed)**: 3-7 concrete observations with specific evidence
 - **Structural Conclusions**: Analysis of convexity, regime dependencies, failure modes
@@ -675,14 +684,20 @@ Activated by `/auto_analyze [scope]` command.
 - **Suggested Memory Updates**: Recommended rule/insight changes (user must confirm)
 - **Long-Term Risk Flags**: Systemic risks that persist across runs
 
-**Template**: `src/prompts/autoAnalyzePrompt.ts` → `buildAutoAnalyzePrompt(scope, analysisInput)`
+**Prompt Templates**:
+- `researchAgentPrompts.ts`: Focused prompts for each agent (Pattern Miner, Curator, Risk Officer, Experiment Director)
+- `autoAnalyzePrompt.ts`: Final synthesis prompt for PRIMARY_MODEL
 
-**Orchestration Helpers**: `src/lib/autoAnalyze.ts`
-- `selectKeyRuns(runs)`: Picks 3-5 representative runs (best, worst, recent, outliers)
-- `buildRunPortfolioSummary(runs)`: Aggregates metrics, identifies regime gaps, highlights extremes
-- `assembleAgentInputs(...)`: Merges all agent outputs into single analysis context
+**Orchestration Helpers**:
+- `src/lib/autoAnalyze.ts`: `buildRunPortfolioSummary()` for aggregated run metrics
+- `src/lib/patternSummaries.ts`: `buildRunsAggregate()`, `buildRelevantMemory()`
+- `src/lib/memoryCuration.ts`: `buildCurationSummary()` for memory context
+- `src/lib/riskSummaries.ts`: `buildRiskRunSummary()`, `buildRiskMemorySummary()`
+- `src/lib/experimentPlanning.ts`: `buildExperimentRunSummary()`, `buildExperimentMemorySummary()`
 
-**Integration**: Command internally invokes each agent mode (not via slash commands), collects outputs, assembles unified context, then calls `chat` edge function with Autonomous Research Loop prompt → structured 8-section report returned to chat
+**Integration**: Command uses `runSwarm()` to execute 4 research agents in parallel (SWARM tier), then `chat-primary` to synthesize final report (PRIMARY tier). Results returned to chat as structured report.
+
+**Performance**: Parallel execution significantly reduces latency vs sequential agent calls. Typically 4 agents complete in parallel rather than sequentially, improving total time by ~75%.
 
 **Important**: No auto-execution of backtests or auto-editing of memory. All recommendations require user confirmation. Works best with >20 runs and meaningful memory. Minimum 5 completed runs required.
 
