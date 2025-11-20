@@ -27,7 +27,14 @@ import {
   buildRiskAgentPrompt,
   buildExperimentAgentPrompt,
 } from '@/prompts/researchAgentPrompts';
-import { writeFile, deleteFile } from '@/lib/codeWriter';
+import { writeFile, appendFile, deleteFile, renameFile, copyFile, createDirectory, type WriteConfirmationCallback } from '@/lib/codeWriter';
+
+// Global confirmation callback - set by ChatArea
+let globalWriteConfirmationCallback: WriteConfirmationCallback | undefined;
+
+export function setWriteConfirmationCallback(callback: WriteConfirmationCallback | undefined) {
+  globalWriteConfirmationCallback = callback;
+}
 
 export interface CommandResult {
   success: boolean;
@@ -1614,7 +1621,7 @@ async function handleWriteFile(args: string, context: CommandContext): Promise<C
   
   const [, path, content] = match;
   
-  const result = await writeFile(path, content);
+  const result = await writeFile(path, content, globalWriteConfirmationCallback);
   
   if (!result.success) {
     return {
@@ -1636,6 +1643,44 @@ async function handleWriteFile(args: string, context: CommandContext): Promise<C
 }
 
 /**
+ * /append_file command - append content to file
+ */
+async function handleAppendFile(args: string, context: CommandContext): Promise<CommandResult> {
+  const match = args.match(/^(\S+)\s+(.+)$/s);
+  if (!match) {
+    return { 
+      success: false, 
+      message: '❌ Usage: /append_file <path> <content>\n\nExample:\n/append_file strategies/test.py # New function\ndef new_func():\n    pass' 
+    };
+  }
+  
+  const [, path, content] = match;
+  
+  const result = await appendFile(path, content, globalWriteConfirmationCallback);
+  
+  if (!result.success) {
+    return {
+      success: false,
+      message: `❌ Append failed: ${result.error}`
+    };
+  }
+  
+  let message = `✅ Content appended successfully: \`${path}\``;
+  if (result.backup_path) {
+    message += `\n📦 Backup created: \`${result.backup_path}\``;
+  }
+  if (result.preview) {
+    message += `\n\n**Preview (last 20 lines):**\n\`\`\`\n${result.preview}\n\`\`\``;
+  }
+  
+  return {
+    success: true,
+    message,
+    data: result
+  };
+}
+
+/**
  * /delete_file command - delete file with backup
  */
 async function handleDeleteFile(args: string, context: CommandContext): Promise<CommandResult> {
@@ -1647,7 +1692,7 @@ async function handleDeleteFile(args: string, context: CommandContext): Promise<
     };
   }
   
-  const result = await deleteFile(path);
+  const result = await deleteFile(path, globalWriteConfirmationCallback);
   
   if (!result.success) {
     return {
@@ -1664,6 +1709,99 @@ async function handleDeleteFile(args: string, context: CommandContext): Promise<
   return {
     success: true,
     message,
+    data: result
+  };
+}
+
+/**
+ * /rename_file command - rename or move file
+ */
+async function handleRenameFile(args: string, context: CommandContext): Promise<CommandResult> {
+  const match = args.match(/^(\S+)\s+(\S+)$/);
+  if (!match) {
+    return { 
+      success: false, 
+      message: '❌ Usage: /rename_file <old_path> <new_path>\n\nExample:\n/rename_file strategies/old.py strategies/new.py' 
+    };
+  }
+  
+  const [, oldPath, newPath] = match;
+  
+  const result = await renameFile(oldPath, newPath, globalWriteConfirmationCallback);
+  
+  if (!result.success) {
+    return {
+      success: false,
+      message: `❌ Rename failed: ${result.error}`
+    };
+  }
+  
+  let message = `✅ File renamed: \`${oldPath}\` → \`${newPath}\``;
+  if (result.backup_path) {
+    message += `\n📦 Backup created: \`${result.backup_path}\``;
+  }
+  
+  return {
+    success: true,
+    message,
+    data: result
+  };
+}
+
+/**
+ * /copy_file command - copy file
+ */
+async function handleCopyFile(args: string, context: CommandContext): Promise<CommandResult> {
+  const match = args.match(/^(\S+)\s+(\S+)$/);
+  if (!match) {
+    return { 
+      success: false, 
+      message: '❌ Usage: /copy_file <source_path> <dest_path>\n\nExample:\n/copy_file strategies/base.py strategies/variant.py' 
+    };
+  }
+  
+  const [, sourcePath, destPath] = match;
+  
+  const result = await copyFile(sourcePath, destPath, globalWriteConfirmationCallback);
+  
+  if (!result.success) {
+    return {
+      success: false,
+      message: `❌ Copy failed: ${result.error}`
+    };
+  }
+  
+  return {
+    success: true,
+    message: `✅ File copied: \`${sourcePath}\` → \`${destPath}\``,
+    data: result
+  };
+}
+
+/**
+ * /create_dir command - create directory
+ */
+async function handleCreateDir(args: string, context: CommandContext): Promise<CommandResult> {
+  const path = args.trim();
+  if (!path) {
+    return { 
+      success: false, 
+      message: '❌ Usage: /create_dir <path>\n\nExample:\n/create_dir strategies/experimental' 
+    };
+  }
+  
+  const result = await createDirectory(path);
+  
+  if (!result.success) {
+    return {
+      success: false,
+      message: `❌ Directory creation failed: ${result.error}`
+    };
+  }
+  
+  return {
+    success: true,
+    message: `✅ Directory created: \`${path}\``,
     data: result
   };
 }
@@ -1729,9 +1867,21 @@ async function handleHelp(): Promise<CommandResult> {
       `✏️ /write_file <path> <content>\n` +
       `   Create or overwrite a file with new content (creates backup if exists)\n` +
       `   Example: /write_file strategies/new.py def my_strategy():\\n    pass\n\n` +
+      `➕ /append_file <path> <content>\n` +
+      `   Append content to end of file\n` +
+      `   Example: /append_file strategies/test.py # New function\\ndef new():\\n    pass\n\n` +
       `🗑️ /delete_file <path>\n` +
       `   Delete a file (creates backup before deletion)\n` +
       `   Example: /delete_file strategies/old.py\n\n` +
+      `📝 /rename_file <old_path> <new_path>\n` +
+      `   Rename or move a file\n` +
+      `   Example: /rename_file strategies/old.py strategies/new.py\n\n` +
+      `📋 /copy_file <source> <dest>\n` +
+      `   Copy a file to new location\n` +
+      `   Example: /copy_file strategies/base.py strategies/variant.py\n\n` +
+      `📁 /create_dir <path>\n` +
+      `   Create a new directory\n` +
+      `   Example: /create_dir strategies/experimental\n\n` +
       `❓ /help\n` +
       `   Show this help message`,
   };
@@ -1865,14 +2015,42 @@ export const commands: Record<string, Command> = {
     description: 'Create or overwrite a file with new content',
     usage: '/write_file <path> <content>',
     handler: handleWriteFile,
-    tier: undefined, // No chat call, uses write-file endpoint
+    tier: undefined,
+  },
+  append_file: {
+    name: 'append_file',
+    description: 'Append content to end of file',
+    usage: '/append_file <path> <content>',
+    handler: handleAppendFile,
+    tier: undefined,
   },
   delete_file: {
     name: 'delete_file',
     description: 'Delete a file (creates backup)',
     usage: '/delete_file <path>',
     handler: handleDeleteFile,
-    tier: undefined, // No chat call, uses write-file endpoint
+    tier: undefined,
+  },
+  rename_file: {
+    name: 'rename_file',
+    description: 'Rename or move a file',
+    usage: '/rename_file <old_path> <new_path>',
+    handler: handleRenameFile,
+    tier: undefined,
+  },
+  copy_file: {
+    name: 'copy_file',
+    description: 'Copy a file to new location',
+    usage: '/copy_file <source_path> <dest_path>',
+    handler: handleCopyFile,
+    tier: undefined,
+  },
+  create_dir: {
+    name: 'create_dir',
+    description: 'Create a new directory',
+    usage: '/create_dir <path>',
+    handler: handleCreateDir,
+    tier: undefined,
   },
   help: {
     name: 'help',

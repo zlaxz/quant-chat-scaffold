@@ -8,7 +8,8 @@ import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useChatContext } from '@/contexts/ChatContext';
 import { cn } from '@/lib/utils';
-import { executeCommand, parseCommand, getCommandSuggestions, commands } from '@/lib/slashCommands';
+import { executeCommand, parseCommand, getCommandSuggestions, commands, setWriteConfirmationCallback } from '@/lib/slashCommands';
+import { useWriteConfirmation } from '@/hooks/useWriteConfirmation';
 
 interface Message {
   id: string;
@@ -28,6 +29,15 @@ export const ChatArea = () => {
   const { toast } = useToast();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Write confirmation hook
+  const { showConfirmation, ConfirmationDialog } = useWriteConfirmation();
+  
+  // Set global confirmation callback for slash commands
+  useEffect(() => {
+    setWriteConfirmationCallback(showConfirmation);
+    return () => setWriteConfirmationCallback(undefined);
+  }, [showConfirmation]);
 
   // Load messages when session changes
   useEffect(() => {
@@ -325,6 +335,9 @@ export const ChatArea = () => {
             : 'Type /help for available commands'}
         </div>
       </div>
+      
+      {/* Write Confirmation Dialog */}
+      <ConfirmationDialog />
     </div>
   );
 };
