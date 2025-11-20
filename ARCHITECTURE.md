@@ -490,7 +490,133 @@ Activated by `/risk_review [focus]` command.
 
 ---
 
-### `backtest-run`
+### Local Code Bridge (rotation-engine introspection)
+
+The workbench provides read-only access to the rotation-engine codebase through three edge functions and corresponding slash commands. This allows the Chief Quant and agent modes to analyze actual strategy code, not just backtest results.
+
+**Environment Variable**:
+- `ROTATION_ENGINE_ROOT`: Path to the rotation-engine repository (default: `/rotation-engine`)
+
+#### Edge Functions
+
+##### `read-file`
+
+**Endpoint**: `POST /functions/v1/read-file`
+
+**Request Body**:
+```json
+{
+  "path": "profiles/skew.py"
+}
+```
+
+**Behavior**:
+- Validates path (no `..` traversal, no absolute paths)
+- Resolves full path under `ROTATION_ENGINE_ROOT`
+- Reads file contents as text
+- Truncates files > 100KB
+- Returns `{ "content": "<file contents>" }`
+
+**Errors**:
+- 404 if file not found
+- 400 if invalid path
+
+##### `list-dir`
+
+**Endpoint**: `POST /functions/v1/list-dir`
+
+**Request Body**:
+```json
+{
+  "path": "profiles"  // OR "." for root
+}
+```
+
+**Behavior**:
+- Validates path
+- Lists directory entries (files and directories)
+- Sorts: directories first, then files, alphabetically
+- Returns `{ "entries": [{ "name": "skew.py", "type": "file" }, ...] }`
+
+**Errors**:
+- 404 if directory not found
+- 400 if invalid path
+
+##### `search-code`
+
+**Endpoint**: `POST /functions/v1/search-code`
+
+**Request Body**:
+```json
+{
+  "query": "peakless",
+  "path": "profiles"  // optional, defaults to root
+}
+```
+
+**Behavior**:
+- Validates path
+- Recursively scans code files (`.py`, `.js`, `.ts`, `.json`, `.yaml`, `.yml`, `.toml`, `.md`)
+- Skips common non-code directories (`.git`, `__pycache__`, `node_modules`, etc.)
+- Case-insensitive search
+- Returns up to 100 results with file path, line number, and context
+- Returns `{ "results": [{ "file": "profiles/skew.py", "line": 184, "context": "..." }, ...] }`
+
+**Errors**:
+- 400 if query empty or path invalid
+
+#### Slash Commands
+
+##### `/list_dir path:<path>`
+
+Lists files and directories in the rotation-engine repository.
+
+**Examples**:
+- `/list_dir path:profiles`
+- `/list_dir path:.`
+
+**Output**: Formatted directory listing with file/directory icons
+
+##### `/open_file path:<path>`
+
+Shows the contents of a rotation-engine file.
+
+**Examples**:
+- `/open_file path:profiles/skew.py`
+- `/open_file path:engine/filters.py`
+
+**Output**: File contents in code block
+
+##### `/search_code <query>`
+
+Searches rotation-engine code for a term.
+
+**Examples**:
+- `/search_code peakless`
+- `/search_code path:profiles convexity`
+
+**Output**: List of matches with file path, line number, and context snippet
+
+#### Code-Aware Prompt Template
+
+**Template**: `src/prompts/codeAwarePrompt.ts` → `buildCodeAwarePrompt(code, context)`
+
+Used when analyzing rotation-engine source code. Instructs the Chief Quant to:
+1. Summarize code behavior (entry/exit logic, filters, parameters)
+2. Identify structural implications (convexity, regime dependencies, risk characteristics)
+3. Link code to known patterns, rules, and failure modes
+4. Suggest experiments to test hypotheses about code behavior
+
+**Integration**: Can be used manually in chat or integrated into agent modes (Auditor, Pattern Miner, etc.) for code-aware analysis.
+
+**Safety**:
+- All access is READ-ONLY
+- Path validation prevents traversal attacks
+- No write or modification capabilities
+- Binary files and large files are skipped or truncated
+
+---
+
 
 **Endpoint**: `POST /functions/v1/backtest-run`
 
