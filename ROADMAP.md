@@ -284,10 +284,35 @@ These are valuable but not required for v1.0:
 
 ---
 
+## LLM Orchestration Phases
+
+### Phase 1: LLM Tier Routing & Dual Chat Functions ✅
+- Implemented PRIMARY_MODEL and SWARM_MODEL configuration
+- Split chat into chat-primary and chat-swarm functions
+- Added tier metadata to slash commands
+
+### Phase 2: Parallel Swarm Infrastructure ✅
+- Implemented chat-swarm-parallel edge function
+- Created runSwarm() helper for frontend
+- Enabled fan-out → gather → synthesize pattern
+
+### Phase 3: Red Team v2 with Swarm ✅
+- Upgraded /red_team_file to use parallel auditor execution
+- 5 auditors run concurrently via chat-swarm-parallel
+- Final synthesis via chat-primary
+
+### Phase 4: /auto_analyze v2 with Swarm ✅
+- Upgraded /auto_analyze to parallel research agent execution
+- 4 agents (Pattern Miner, Curator, Risk Officer, Experiment Director) run concurrently
+- Final synthesis via chat-primary
+- ~75% latency reduction vs sequential execution
+
+---
+
 ## Current Status
 
-**Phase Completed**: Phase 10 (Run Comparison)
+**Phase Completed**: Phase 4 — /auto_analyze v2 with Swarm Orchestration
 
-**Next Phase**: Stage 1 — Rotation-Engine Integration
+**Next Phase**: Model tier differentiation (Gemini 3 for PRIMARY, cheaper models for SWARM)
 
 **Known Issues**: See ARCHITECTURE.md for technical notes

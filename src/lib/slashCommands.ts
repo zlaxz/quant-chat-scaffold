@@ -20,6 +20,13 @@ import { selectKeyRuns, buildRunPortfolioSummary, assembleAgentInputs } from '@/
 import { buildAutoAnalyzePrompt } from '@/prompts/autoAnalyzePrompt';
 import { buildDefaultReportTitle, extractSummaryFromReport, buildTagsFromReport } from '@/lib/researchReports';
 import { runRedTeamAuditForFile } from '@/lib/redTeamAudit';
+import { runSwarm, type SwarmPrompt } from '@/lib/swarmClient';
+import {
+  buildPatternMinerAgentPrompt,
+  buildCuratorAgentPrompt,
+  buildRiskAgentPrompt,
+  buildExperimentAgentPrompt,
+} from '@/prompts/researchAgentPrompts';
 
 export interface CommandResult {
   success: boolean;
@@ -1144,8 +1151,8 @@ async function handleSearchCode(args: string, context: CommandContext): Promise<
 }
 
 /**
- * /auto_analyze command - autonomous research loop
- * Runs all agent modes and produces comprehensive research report
+ * /auto_analyze command - autonomous research loop (v2 with parallel swarm)
+ * Runs multiple research agents in parallel, then synthesizes via PRIMARY_MODEL
  * Usage: /auto_analyze [scope]
  */
 async function handleAutoAnalyze(args: string, context: CommandContext): Promise<CommandResult> {
@@ -1195,9 +1202,6 @@ async function handleAutoAnalyze(args: string, context: CommandContext): Promise
       }
     }
 
-    // Select key runs for detailed analysis
-    const keyRuns = selectKeyRuns(filteredRuns);
-
     // Build portfolio summary
     const portfolioSummary = buildRunPortfolioSummary(filteredRuns);
 
@@ -1214,109 +1218,73 @@ async function handleAutoAnalyze(args: string, context: CommandContext): Promise
 
     const memoryNotes = (memoryData || []) as MemoryNote[];
 
-    // Run agent modes internally
-    const auditResults: string[] = [];
-
-    // Audit key runs
-    for (const run of keyRuns.slice(0, 3)) {
-      // Limit to top 3 to avoid overwhelming context
-      const runMemory = memoryNotes.filter(note =>
-        note.run_id === run.id ||
-        (note.tags && note.tags.some(tag => run.strategy_key.includes(tag)))
-      );
-
-      const runSummaryText = buildRunSummary(run);
-      const memorySummaryText = buildMemorySummary(runMemory);
-      const auditPrompt = buildAuditPrompt(runSummaryText, memorySummaryText);
-
-      // Call SWARM chat for agent analysis
-      const { data: auditData, error: auditError } = await supabase.functions.invoke('chat-swarm', {
-        body: {
-          sessionId: context.sessionId,
-          workspaceId: context.workspaceId,
-          content: auditPrompt,
-        },
-      });
-
-      if (!auditError && auditData?.message) {
-        auditResults.push(`**Run: ${run.strategy_key} (${run.id.slice(0, 8)})**\n\n${auditData.message}`);
-      }
-    }
-
-    // Pattern Mining
+    // Build summary inputs for agents
     const runsAggregate = buildRunsAggregate(filteredRuns.slice(0, 100));
     const strategyKeys = [...new Set(filteredRuns.map(r => r.strategy_key))];
     const relevantMemory = buildRelevantMemory(memoryNotes as any, strategyKeys);
-    const patternPrompt = buildPatternMinerPrompt(runsAggregate, relevantMemory);
-
-    const { data: patternData } = await supabase.functions.invoke('chat-swarm', {
-      body: {
-        sessionId: context.sessionId,
-        workspaceId: context.workspaceId,
-        content: patternPrompt,
-      },
-    });
-
-    const patternSummary = patternData?.message || '';
-
-    // Memory Curation
-    const curationSummary = buildCurationSummary(memoryNotes as any);
-    const curationPrompt = buildMemoryCuratorPrompt(curationSummary);
-
-    const { data: curationData } = await supabase.functions.invoke('chat-swarm', {
-      body: {
-        sessionId: context.sessionId,
-        workspaceId: context.workspaceId,
-        content: curationPrompt,
-      },
-    });
-
-    const memorySummary = curationData?.message || '';
-
-    // Risk Review
     const riskRunSummary = buildRiskRunSummary(filteredRuns);
     const riskMemorySummary = buildRiskMemorySummary(memoryNotes as any);
-    const riskPrompt = buildRiskOfficerPrompt(riskRunSummary, riskMemorySummary, '');
-
-    const { data: riskData } = await supabase.functions.invoke('chat-swarm', {
-      body: {
-        sessionId: context.sessionId,
-        workspaceId: context.workspaceId,
-        content: riskPrompt,
-      },
-    });
-
-    const riskSummary = riskData?.message || '';
-
-    // Experiment Director
     const experimentRunSummary = buildExperimentRunSummary(filteredRuns);
     const experimentMemorySummary = buildExperimentMemorySummary(memoryNotes as any);
-    const experimentPrompt = buildExperimentDirectorPrompt(experimentRunSummary, '', experimentMemorySummary, scope);
+    const curationSummary = buildCurationSummary(memoryNotes as any);
 
-    const { data: experimentData } = await supabase.functions.invoke('chat-swarm', {
-      body: {
-        sessionId: context.sessionId,
-        workspaceId: context.workspaceId,
-        content: experimentPrompt,
+    // Build swarm prompts for parallel execution
+    const swarmPrompts: SwarmPrompt[] = [
+      {
+        label: 'pattern-miner',
+        content: buildPatternMinerAgentPrompt(runsAggregate, relevantMemory, scope),
       },
+      {
+        label: 'memory-curator',
+        content: buildCuratorAgentPrompt(curationSummary, scope),
+      },
+      {
+        label: 'risk-officer',
+        content: buildRiskAgentPrompt(riskRunSummary, riskMemorySummary, scope),
+      },
+      {
+        label: 'experiment-director',
+        content: buildExperimentAgentPrompt(experimentRunSummary, '', scope),
+      },
+    ];
+
+    // Execute all agents in parallel via SWARM_MODEL
+    console.log(`[Auto-Analyze] Running ${swarmPrompts.length} research agents in parallel...`);
+    const swarmResults = await runSwarm({
+      sessionId: context.sessionId,
+      workspaceId: context.workspaceId,
+      prompts: swarmPrompts,
     });
 
-    const experimentSummary = experimentData?.message || '';
+    // Check if all agents failed
+    const allFailed = swarmResults.every(r => r.error);
+    if (allFailed) {
+      return {
+        success: false,
+        message: '❌ All research agents failed. Check logs for details.',
+      };
+    }
 
-    // Assemble all inputs
-    const analysisInput = assembleAgentInputs(
-      portfolioSummary,
-      auditResults,
-      patternSummary,
-      memorySummary,
-      riskSummary,
-      experimentSummary
-    );
+    // Build synthesis input from agent outputs
+    let synthesisInput = `# Autonomous Research Analysis Input\n\n`;
+    synthesisInput += `**Scope**: ${scope || 'global'}\n\n`;
+    synthesisInput += `## Run Portfolio\n\n${portfolioSummary}\n\n`;
+    
+    // Add agent outputs
+    for (const result of swarmResults) {
+      synthesisInput += `## Agent: ${result.label}\n\n`;
+      if (result.error) {
+        synthesisInput += `*Agent failed: ${result.error}*\n\n`;
+      } else {
+        synthesisInput += `${result.content}\n\n`;
+      }
+    }
 
-    // Build final auto-analyze prompt
-    const finalPrompt = buildAutoAnalyzePrompt(scope, analysisInput);
+    // Build final synthesis prompt
+    const finalPrompt = buildAutoAnalyzePrompt(scope, synthesisInput);
 
     // Call PRIMARY chat for final synthesis (high-stakes reasoning)
+    console.log('[Auto-Analyze] Synthesizing final report via PRIMARY_MODEL...');
     const { data: finalData, error: finalError } = await supabase.functions.invoke('chat-primary', {
       body: {
         sessionId: context.sessionId,
@@ -1328,17 +1296,18 @@ async function handleAutoAnalyze(args: string, context: CommandContext): Promise
     if (finalError) throw finalError;
 
     if (!finalData || !finalData.message) {
-      throw new Error('No response from chat function');
+      throw new Error('No response from chat-primary synthesis');
     }
 
     // Return comprehensive report with save tip
     const scopeNote = scope ? ` (scope: ${scope})` : '';
+    const successfulAgents = swarmResults.filter(r => !r.error).length;
     return {
       success: true,
-      message: `🤖 **Autonomous Research Report**${scopeNote}\n\nAnalyzed ${filteredRuns.length} runs with ${keyRuns.length} key audits, pattern mining, memory curation, risk review, and experiment planning:\n\n${finalData.message}\n\n---\n\n💡 **Tip**: Use \`/save_report\` to store this Research Report for later.`,
+      message: `🤖 **Autonomous Research Report**${scopeNote}\n\nAnalyzed ${filteredRuns.length} runs using ${successfulAgents} parallel research agents:\n\n${finalData.message}\n\n---\n\n💡 **Tip**: Use \`/save_report\` to store this Research Report for later.`,
       data: {
         runsAnalyzed: filteredRuns.length,
-        keyRunsAudited: keyRuns.length,
+        agentsUsed: successfulAgents,
         memoryNotesReviewed: memoryNotes.length,
         scope: scope || null,
         report: finalData.message,
