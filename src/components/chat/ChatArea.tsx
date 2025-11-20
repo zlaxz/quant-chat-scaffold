@@ -29,6 +29,11 @@ export const ChatArea = () => {
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  // Debug: Log available commands
+  useEffect(() => {
+    console.log('Available commands:', Object.keys(commands).length, Object.keys(commands));
+  }, []);
+
   // Load messages when session changes
   useEffect(() => {
     if (selectedSessionId) {
