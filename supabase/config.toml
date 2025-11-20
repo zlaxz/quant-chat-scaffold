@@ -46,6 +46,9 @@ verify_jwt = false
 [functions.helper-chat]
 verify_jwt = false
 
+[functions.write-file]
+verify_jwt = false
+
 [functions.read-file]
 verify_jwt = false
 
