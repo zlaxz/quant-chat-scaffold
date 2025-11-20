@@ -373,6 +373,45 @@ Accessible via `/mine_patterns` slash command. Analyzes multiple backtest runs t
 
 ---
 
+### Memory Curator Mode (`/curate_memory`)
+
+Activated by `/curate_memory` command.
+
+**Purpose**: Review and propose improvements to the rule set and memory organization based on evidence and logical consistency.
+
+**Process**:
+1. Fetch all non-archived memory notes for current workspace (up to 200)
+2. Analyze using curation helpers:
+   - Group notes by strategy tags
+   - Find promotion candidates (insights → rules)
+   - Find weak rules (lack evidence, old, contradicted)
+   - Detect conflicts (opposite rules on same topic)
+3. Build comprehensive curation summary
+4. Compose Memory Curator prompt
+5. Call chat function to generate recommendations
+
+**Output Sections**:
+- **Promote to Rules**: Insights that deserve promotion, with rationale
+- **Demote or Archive Rules**: Weak rules to downgrade/remove
+- **Merge or Refactor Notes**: Duplicates, overlaps
+- **Contradictions**: Conflicting rules and resolutions
+- **Proposed Updated Ruleset**: Cleaned-up rule list by strategy
+
+**Template**: `src/prompts/memoryCuratorPrompt.ts` → `buildMemoryCuratorPrompt(summary)`
+
+**Curation Helpers**: `src/lib/memoryCuration.ts`
+- `groupMemoryByStrategy(notes)`: Groups by strategy tag, with "global" fallback
+- `findPromotionCandidates(notes)`: High-importance insights or multi-tagged insights
+- `findWeakRules(notes)`: Rules without run evidence, old with low importance
+- `findConflicts(notes)`: Keyword-based conflict detection for same-domain rules
+- `buildCurationSummary(notes)`: Comprehensive text summary with all analysis sections
+
+**Integration**: Command calls `chat` edge function with curator prompt; Chief Quant base identity + curator instructions → structured recommendations returned to chat
+
+**Important**: Curator only makes recommendations; user must manually implement changes via Memory panel editing.
+
+---
+
 ### `backtest-run`
 
 **Endpoint**: `POST /functions/v1/backtest-run`
@@ -686,8 +725,34 @@ All commands are parsed and executed in `ChatArea.tsx` before sending to LLM.
      - Candidate Rules (proposed new rules)
      - Deprecated Rules (contradicted by evidence)
      - Suggested Experiments
-  9. Display pattern mining result in chat as system message
-  10. Minimum 5 completed runs required
+   9. Display pattern mining result in chat as system message
+   10. Minimum 5 completed runs required
+
+#### `/curate_memory`
+- **Description**: Review and propose improvements to the current rule set and memory notes
+- **Usage**: `/curate_memory`
+- **Behavior**:
+   1. Fetch all non-archived memory notes for current workspace (up to 200)
+   2. Analyze memory using curation helpers:
+      - Group notes by strategy tags
+      - Find promotion candidates (insights → rules based on importance/evidence)
+      - Find weak rules (lack run evidence, old with low importance)
+      - Detect conflicts (opposite keywords in same-domain rules)
+   3. Build comprehensive curation summary:
+      - Current rules by strategy with importance levels
+      - Promotion candidates with rationale
+      - Weak rules with rationale
+      - Potential conflicts with details
+   4. Build Memory Curator prompt using Chief Quant Curator mode template
+   5. Call `chat` edge function with curator prompt
+   6. Return structured recommendations with sections:
+      - Promote to Rules (with rationale and suggested importance)
+      - Demote or Archive Rules (with rationale and suggested action)
+      - Merge or Refactor Notes (duplicates/overlaps)
+      - Contradictions (conflicting rules and resolutions)
+      - Proposed Updated Ruleset (cleaned-up rules by strategy)
+   7. Display curator recommendations in chat as system message
+   8. Note: Recommendations only; user must manually edit via Memory panel
 
 ### Command Autocomplete
 

@@ -9,6 +9,8 @@ import { buildAuditPrompt } from '@/prompts/auditorPrompt';
 import { buildRunSummary, buildMemorySummary, type MemoryNote } from '@/lib/auditSummaries';
 import { buildPatternMinerPrompt } from '@/prompts/patternMinerPrompt';
 import { buildRunsAggregate, buildRelevantMemory } from '@/lib/patternSummaries';
+import { buildMemoryCuratorPrompt } from '@/prompts/memoryCuratorPrompt';
+import { buildCurationSummary } from '@/lib/memoryCuration';
 
 export interface CommandResult {
   success: boolean;
@@ -656,6 +658,87 @@ async function handleMinePatterns(args: string, context: CommandContext): Promis
 }
 
 /**
+ * /curate_memory command - Review and propose improvements to the rule set
+ */
+async function handleCurateMemory(
+  _args: string,
+  context: CommandContext
+): Promise<CommandResult> {
+  try {
+    // Fetch all non-archived memory for this workspace
+    const { data: notes, error: notesError } = await supabase
+      .from('memory_notes')
+      .select('*')
+      .eq('workspace_id', context.workspaceId)
+      .eq('archived', false)
+      .order('created_at', { ascending: false })
+      .limit(200);
+
+    if (notesError) throw notesError;
+
+    if (!notes || notes.length === 0) {
+      return {
+        success: true,
+        message: `📋 No memory notes to curate yet. Start by creating insights with /note or saving run insights from the Results panel.`,
+      };
+    }
+
+    // Map to expected MemoryNote structure
+    const memoryNotes = notes.map(note => ({
+      id: note.id,
+      workspace_id: note.workspace_id,
+      content: note.content,
+      source: note.source,
+      tags: note.tags || [],
+      created_at: note.created_at,
+      run_id: note.run_id,
+      metadata: note.metadata || {},
+      memory_type: note.memory_type || 'insight',
+      importance: note.importance || 'normal',
+      archived: note.archived || false,
+      embedding: note.embedding,
+    }));
+
+    // Build curation summary using helpers
+    const summary = buildCurationSummary(memoryNotes);
+
+    // Build curator prompt
+    const curatorPrompt = buildMemoryCuratorPrompt(summary);
+
+    // Call chat function with curator prompt
+    const { data: chatData, error: chatError } = await supabase.functions.invoke('chat', {
+      body: {
+        sessionId: context.sessionId,
+        workspaceId: context.workspaceId,
+        content: curatorPrompt,
+      },
+    });
+
+    if (chatError) throw chatError;
+
+    if (!chatData || !chatData.message) {
+      throw new Error('No response from chat function');
+    }
+
+    // Return curator recommendations
+    return {
+      success: true,
+      message: `🔧 **Memory Curation Recommendations** (${notes.length} notes reviewed)\n\n${chatData.message}\n\n---\n💡 **Note**: These are recommendations only. Use the Memory panel to edit notes manually.`,
+      data: {
+        notesReviewed: notes.length,
+        recommendations: chatData.message,
+      },
+    };
+  } catch (error: any) {
+    console.error('Memory curation command error:', error);
+    return {
+      success: false,
+      message: `❌ Failed to curate memory: ${error.message || 'Unknown error'}`,
+    };
+  }
+}
+
+/**
  * /help command - show available commands
  */
 async function handleHelp(): Promise<CommandResult> {
@@ -677,6 +760,9 @@ async function handleHelp(): Promise<CommandResult> {
       `🧠 /mine_patterns [limit]\n` +
       `   Detect recurring patterns across runs and memory (10-200, default: 100)\n` +
       `   Example: /mine_patterns 50\n\n` +
+      `🔧 /curate_memory\n` +
+      `   Review stored rules/insights and propose promotions, demotions, and cleanups\n` +
+      `   Example: /curate_memory\n\n` +
       `💡 /note <content> [type:TYPE] [importance:LEVEL] [tags:tag1,tag2]\n` +
       `   Create a memory note\n` +
       `   Example: /note This fails in bear markets type:warning importance:high\n\n` +
@@ -718,6 +804,12 @@ const commands: Record<string, Command> = {
     description: 'Detect recurring patterns across runs and memory',
     usage: '/mine_patterns [limit]',
     handler: handleMinePatterns,
+  },
+  curate_memory: {
+    name: 'curate_memory',
+    description: 'Review and propose improvements to the current rule set and memory notes',
+    usage: '/curate_memory',
+    handler: handleCurateMemory,
   },
   note: {
     name: 'note',

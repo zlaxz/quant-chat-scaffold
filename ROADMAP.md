@@ -107,7 +107,25 @@ Version 1.0 is considered complete when:
 - ✅ **Pattern Mining Prompt**: `patternMinerPrompt.ts` with 6-section structured output
 - ✅ **Evidence Counting**: Emphasis on evidence counts and recurring themes across runs
 
-### Stage 6: Thin Local-Code Tools
+### Stage 6: Memory Curator & Rule Engine ✅
+- ✅ **Memory Curation**: `/curate_memory` command reviews all non-archived memory notes (up to 200)
+- ✅ **Curation Helpers**: `memoryCuration.ts` with analysis functions:
+  - `groupMemoryByStrategy()`: Groups notes by strategy tag with "global" fallback
+  - `findPromotionCandidates()`: Identifies insights ready for promotion to rules
+  - `findWeakRules()`: Detects rules lacking evidence or outdated
+  - `findConflicts()`: Keyword-based conflict detection for same-domain rules
+  - `buildCurationSummary()`: Comprehensive text summary for all analysis sections
+- ✅ **Curator Prompt**: `memoryCuratorPrompt.ts` with 5-section structured output
+- ✅ **Recommendations**:
+  - Promote to Rules (with rationale and suggested importance)
+  - Demote or Archive Rules (with rationale and suggested action)
+  - Merge or Refactor Notes (duplicates/overlaps)
+  - Contradictions (conflicting rules and resolutions)
+  - Proposed Updated Ruleset (cleaned-up rules by strategy)
+- ✅ **Conservative Approach**: Suggestions only; user manually edits via Memory panel
+- ✅ **Integration**: Uses Chief Quant Curator mode identity for analysis
+
+### Stage 7: Thin Local-Code Tools
 - **Repo Bridge**: Simple API bridge to local rotation-engine repo for reading code/configs
 - **Code Search**: `/code <query>` to search local repo from chat
 - **Config Preview**: Show current rotation-engine config in chat when discussing strategies
