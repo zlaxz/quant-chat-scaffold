@@ -62,16 +62,12 @@ export async function runRedTeamAuditForFile(params: {
   context?: string;
 }): Promise<RedTeamAuditResult> {
   const { sessionId, workspaceId, path, code, context = '' } = params;
-  
-  console.log(`Starting red team audit for ${path} (parallel execution)`);
 
   // STEP 1: Build all auditor prompts
   const prompts: SwarmPrompt[] = AUDITORS.map(auditor => ({
     label: auditor.role,
     content: auditor.buildPrompt(code, path, context),
   }));
-
-  console.log(`Built ${prompts.length} auditor prompts, executing in parallel...`);
 
   // STEP 2: Run all auditors in parallel via swarm
   let results;
@@ -82,11 +78,8 @@ export async function runRedTeamAuditForFile(params: {
       prompts,
     });
   } catch (err: any) {
-    console.error('Swarm execution failed:', err);
     throw new Error(`Red team audit failed: ${err.message}`);
   }
-
-  console.log(`Parallel execution complete, received ${results.length} results`);
 
   // STEP 3: Build sub-reports from swarm results
   const subReports: SubReport[] = [];
@@ -110,8 +103,6 @@ export async function runRedTeamAuditForFile(params: {
   }
 
   // STEP 4: Synthesize all sub-reports into final report via chat-primary
-  console.log('Synthesizing final report via chat-primary...');
-  
   const synthesisPrompt = `You are synthesizing a Red Team Code Audit Report.
 
 **File:** ${path}
@@ -147,7 +138,6 @@ Now synthesize this into a final Code Audit Report.`;
     });
 
     if (error) {
-      console.error('Synthesis failed:', error);
       synthesizedReport = `⚠️ Synthesis failed: ${error.message}\n\nFalling back to raw sub-reports:\n\n${reportSections.join('\n---\n\n')}`;
     } else {
       // Extract synthesized content
@@ -162,11 +152,8 @@ Now synthesize this into a final Code Audit Report.`;
       }
     }
   } catch (err: any) {
-    console.error('Synthesis exception:', err);
     synthesizedReport = `⚠️ Synthesis exception: ${err.message}\n\nFalling back to raw sub-reports:\n\n${reportSections.join('\n---\n\n')}`;
   }
-
-  console.log('Red team audit complete');
 
   return {
     report: synthesizedReport,

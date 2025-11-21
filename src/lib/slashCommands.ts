@@ -418,9 +418,9 @@ async function handleCompare(args: string, context: CommandContext): Promise<Com
 
     const summary = `📊 Run Comparison (${data.length} runs)\n\n${runSummaries}\n\n` +
                    `🏆 Best Performers:\n` +
-                   `• Highest CAGR: Run #${bestCAGR + 1} (${(data[bestCAGR].metrics.cagr * 100).toFixed(2)}%)\n` +
-                   `• Best Sharpe: Run #${bestSharpe + 1} (${data[bestSharpe].metrics.sharpe.toFixed(2)})\n` +
-                   `• Lowest Max DD: Run #${bestDrawdown + 1} (${(data[bestDrawdown].metrics.max_drawdown * 100).toFixed(2)}%)\n\n` +
+                   `• Highest CAGR: Run #${bestCAGR + 1} (${data[bestCAGR].metrics.cagr != null ? (data[bestCAGR].metrics.cagr * 100).toFixed(2) : 'N/A'}%)\n` +
+                   `• Best Sharpe: Run #${bestSharpe + 1} (${data[bestSharpe].metrics.sharpe != null ? data[bestSharpe].metrics.sharpe.toFixed(2) : 'N/A'})\n` +
+                   `• Lowest Max DD: Run #${bestDrawdown + 1} (${data[bestDrawdown].metrics.max_drawdown != null ? (data[bestDrawdown].metrics.max_drawdown * 100).toFixed(2) : 'N/A'}%)\n\n` +
                    `💡 For visual comparison, select runs in the Quant tab using the checkboxes.`;
 
     return {
