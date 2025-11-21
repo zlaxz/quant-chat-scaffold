@@ -5,6 +5,17 @@
 
 import { readFile, listDirectory, searchCode } from './fileOperations.ts';
 import { executeGitCommand } from './gitOperations.ts';
+import {
+  runTests,
+  validateStrategy,
+  dryRunBacktest,
+  lintCode,
+  formatCode,
+  typeCheck,
+  checkDependencies,
+  checkOutdatedPackages,
+  checkPythonVersion
+} from './validationOperations.ts';
 
 export interface McpTool {
   name: string;
@@ -381,6 +392,129 @@ export const MCP_TOOLS: McpTool[] = [
         }
       }
     }
+  },
+  {
+    name: 'run_tests',
+    description: 'Execute pytest test suite for rotation-engine',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Optional path to specific test file or directory'
+        },
+        verbose: {
+          type: 'boolean',
+          description: 'Enable verbose output'
+        }
+      }
+    }
+  },
+  {
+    name: 'validate_strategy',
+    description: 'Validate strategy file syntax and logic',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Path to strategy file (e.g., "strategies/skew_convexity.py")'
+        }
+      },
+      required: ['path']
+    }
+  },
+  {
+    name: 'dry_run_backtest',
+    description: 'Quick validation of backtest parameters without full execution',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        strategy_key: {
+          type: 'string',
+          description: 'Strategy key (e.g., "skew_convexity_v1")'
+        },
+        start_date: {
+          type: 'string',
+          description: 'Start date (YYYY-MM-DD)'
+        },
+        end_date: {
+          type: 'string',
+          description: 'End date (YYYY-MM-DD)'
+        }
+      },
+      required: ['strategy_key', 'start_date', 'end_date']
+    }
+  },
+  {
+    name: 'lint_code',
+    description: 'Run code linter (flake8 or pylint) on Python files',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Path to file or directory to lint'
+        }
+      },
+      required: ['path']
+    }
+  },
+  {
+    name: 'format_code',
+    description: 'Check code formatting with black (non-destructive)',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Path to file to check formatting'
+        },
+        check: {
+          type: 'boolean',
+          description: 'Only check, do not modify (default: true)'
+        }
+      },
+      required: ['path']
+    }
+  },
+  {
+    name: 'type_check',
+    description: 'Run mypy type checking on Python files',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Path to file to type check'
+        }
+      },
+      required: ['path']
+    }
+  },
+  {
+    name: 'check_deps',
+    description: 'Verify all required dependencies are installed',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
+  },
+  {
+    name: 'outdated_packages',
+    description: 'Check for outdated Python packages',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
+  },
+  {
+    name: 'python_version',
+    description: 'Check Python version compatibility',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    }
   }
 ];
 
@@ -455,6 +589,33 @@ export async function executeMcpTool(
       
       case 'git_stash':
         return await executeGitStash(args, engineRoot);
+      
+      case 'run_tests':
+        return await executeRunTests(args.path, args.verbose, engineRoot);
+      
+      case 'validate_strategy':
+        return await executeValidateStrategy(args.path, engineRoot);
+      
+      case 'dry_run_backtest':
+        return await executeDryRunBacktest(args.strategy_key, args.start_date, args.end_date, engineRoot);
+      
+      case 'lint_code':
+        return await executeLintCode(args.path, engineRoot);
+      
+      case 'format_code':
+        return await executeFormatCode(args.path, args.check !== false, engineRoot);
+      
+      case 'type_check':
+        return await executeTypeCheck(args.path, engineRoot);
+      
+      case 'check_deps':
+        return await executeCheckDeps(engineRoot);
+      
+      case 'outdated_packages':
+        return await executeOutdatedPackages(engineRoot);
+      
+      case 'python_version':
+        return await executePythonVersion(engineRoot);
       
       default:
         return {
@@ -682,4 +843,76 @@ async function executeGitStash(args: any, engineRoot: string): Promise<McpToolRe
     return { content: [{ type: 'text', text: result.error }], isError: true };
   }
   return { content: [{ type: 'text', text: result.output || 'Stash operation completed' }] };
+}
+
+async function executeRunTests(path: string | undefined, verbose: boolean | undefined, engineRoot: string): Promise<McpToolResult> {
+  const result = await runTests(path, engineRoot, verbose);
+  if (result.error) {
+    return { content: [{ type: 'text', text: `Test execution failed:\n${result.error}` }], isError: true };
+  }
+  return { content: [{ type: 'text', text: result.output || 'Tests completed' }] };
+}
+
+async function executeValidateStrategy(path: string, engineRoot: string): Promise<McpToolResult> {
+  const result = await validateStrategy(path, engineRoot);
+  if (result.error) {
+    return { content: [{ type: 'text', text: result.error }], isError: true };
+  }
+  return { content: [{ type: 'text', text: result.output || 'Strategy validation passed' }] };
+}
+
+async function executeDryRunBacktest(strategyKey: string, startDate: string, endDate: string, engineRoot: string): Promise<McpToolResult> {
+  const result = await dryRunBacktest(strategyKey, startDate, endDate, engineRoot);
+  if (result.error) {
+    return { content: [{ type: 'text', text: result.error }], isError: true };
+  }
+  return { content: [{ type: 'text', text: result.output || 'Dry run completed' }] };
+}
+
+async function executeLintCode(path: string, engineRoot: string): Promise<McpToolResult> {
+  const result = await lintCode(path, engineRoot);
+  if (result.error && !result.output) {
+    return { content: [{ type: 'text', text: result.error }], isError: true };
+  }
+  return { content: [{ type: 'text', text: result.output || 'No linting issues found' }] };
+}
+
+async function executeFormatCode(path: string, check: boolean, engineRoot: string): Promise<McpToolResult> {
+  const result = await formatCode(path, engineRoot, check);
+  if (result.error && !result.output) {
+    return { content: [{ type: 'text', text: result.error }], isError: true };
+  }
+  return { content: [{ type: 'text', text: result.output || 'Code formatting check passed' }] };
+}
+
+async function executeTypeCheck(path: string, engineRoot: string): Promise<McpToolResult> {
+  const result = await typeCheck(path, engineRoot);
+  if (result.error && !result.output) {
+    return { content: [{ type: 'text', text: result.error }], isError: true };
+  }
+  return { content: [{ type: 'text', text: result.output || 'Type checking passed' }] };
+}
+
+async function executeCheckDeps(engineRoot: string): Promise<McpToolResult> {
+  const result = await checkDependencies(engineRoot);
+  if (result.error) {
+    return { content: [{ type: 'text', text: result.error }], isError: true };
+  }
+  return { content: [{ type: 'text', text: result.output || 'All dependencies installed' }] };
+}
+
+async function executeOutdatedPackages(engineRoot: string): Promise<McpToolResult> {
+  const result = await checkOutdatedPackages(engineRoot);
+  if (result.error && !result.output) {
+    return { content: [{ type: 'text', text: result.error }], isError: true };
+  }
+  return { content: [{ type: 'text', text: result.output || 'All packages up to date' }] };
+}
+
+async function executePythonVersion(engineRoot: string): Promise<McpToolResult> {
+  const result = await checkPythonVersion(engineRoot);
+  if (result.error) {
+    return { content: [{ type: 'text', text: result.error }], isError: true };
+  }
+  return { content: [{ type: 'text', text: result.output || 'Python version check completed' }] };
 }

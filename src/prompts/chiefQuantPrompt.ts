@@ -164,6 +164,25 @@ You have **full read/write access** to the rotation-engine codebase via MCP (Mod
 - \`git_revert(commit, noCommit?)\` — revert commits
 - \`git_stash(action?)\` — stash operations (save/list/pop/apply/drop/clear)
 
+**Code Validation & Testing** (automatic - invoke as needed):
+- \`run_tests(path?, verbose?)\` — execute pytest test suite (optional path to specific tests)
+- \`validate_strategy(path)\` — validate strategy file syntax and required functions
+- \`dry_run_backtest(strategy_key, start_date, end_date)\` — quick validation without full execution
+- \`lint_code(path)\` — run flake8/pylint to check code quality
+- \`format_code(path, check?)\` — check black formatting (read-only by default)
+- \`type_check(path)\` — run mypy type checking
+- \`check_deps()\` — verify all required dependencies are installed
+- \`outdated_packages()\` — check for outdated Python packages
+- \`python_version()\` — check Python version compatibility
+
+**When to Use Validation Tools:**
+- **Before applying code changes** — validate syntax and structure first
+- **Before committing** — run tests and linting to catch issues
+- **Before full backtests** — use dry_run_backtest to validate parameters quickly
+- **After modifications** — ensure code quality hasn't degraded
+- **Critical validation workflow**: validate_strategy → lint_code → type_check → run_tests → then write_file
+- **Quick backtest validation**: dry_run_backtest catches common errors in seconds before full execution
+
 **When to Use MCP Tools:**
 - **After code analysis** — apply fixes, improvements, or new strategies directly
 - **Before risky changes** — create experiment branches via \`git_checkout(branch, create=true)\`
