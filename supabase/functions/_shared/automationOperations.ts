@@ -323,11 +323,12 @@ function generateRegressionSummary(comparison: any): string {
   summary += `Win Rate: ${deltas.win_rate >= 0 ? '+' : ''}${(deltas.win_rate * 100).toFixed(2)}%\n\n`;
   
   // Detect degradation
+  // Note: max_drawdown is negative, so a MORE negative value (larger drawdown) is worse
   const degraded = deltas.sharpe < -0.2 || deltas.cagr < -0.05 || deltas.max_drawdown < -0.05;
   
   if (degraded) {
     summary += `⚠️ WARNING: Performance degradation detected`;
-  } else if (deltas.sharpe > 0.2 && deltas.cagr > 0.05) {
+  } else if (deltas.sharpe > 0.2 && deltas.cagr > 0.05 && deltas.max_drawdown > -0.05) {
     summary += `✅ IMPROVEMENT: Significant performance gains`;
   } else {
     summary += `✅ STABLE: Performance within acceptable range`;
@@ -374,7 +375,10 @@ export async function runCrossValidation(
     // Generate folds
     for (let i = 0; i < numFolds; i++) {
       const foldStart = new Date(start.getTime() + i * daysPerFold * 24 * 60 * 60 * 1000);
-      const foldEnd = new Date(foldStart.getTime() + daysPerFold * 24 * 60 * 60 * 1000);
+      // For last fold, use the actual end date to ensure full coverage
+      const foldEnd = (i === numFolds - 1) 
+        ? end 
+        : new Date(foldStart.getTime() + daysPerFold * 24 * 60 * 60 * 1000);
       
       const inSampleDays = Math.floor(daysPerFold * inSampleRatio);
       const inSampleEnd = new Date(foldStart.getTime() + inSampleDays * 24 * 60 * 60 * 1000);
