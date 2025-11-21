@@ -77,12 +77,24 @@ import ast
 import os
 from pathlib import Path
 
+def safe_relative_path(file_path, base_path):
+    """Safely get relative path, fallback to filename if it fails"""
+    try:
+        return str(file_path.relative_to(base_path))
+    except (ValueError, TypeError):
+        return file_path.name
+
 def find_function(name, search_path):
     results = []
-    root = Path(search_path)
+    root = Path(search_path).resolve()
     
     # Find all Python files
-    py_files = list(root.rglob("*.py")) if root.is_dir() else [root]
+    if root.is_dir():
+        py_files = list(root.rglob("*.py"))
+    elif root.is_file():
+        py_files = [root]
+    else:
+        return f"❌ Path not found: {search_path}"
     
     for file_path in py_files:
         try:
@@ -105,16 +117,18 @@ def find_function(name, search_path):
                     # Get line number
                     line_no = node.lineno
                     
+                    rel_path = safe_relative_path(file_path, root)
                     results.append(f"""
-📍 {file_path.relative_to(Path.cwd())}:{line_no}
+📍 {rel_path}:{line_no}
    Signature: {signature}
    Docstring: {docstring[:100]}{"..." if len(docstring) > 100 else ""}
 """)
         except Exception as e:
-            continue
+            # Log but continue
+            pass
     
     if not results:
-        return f"❌ Function '{name}' not found"
+        return f"❌ Function '{name}' not found in {search_path}"
     
     return "\\n".join(results)
 
@@ -139,10 +153,23 @@ import sys
 import ast
 from pathlib import Path
 
+def safe_relative_path(file_path, base_path):
+    """Safely get relative path, fallback to filename if it fails"""
+    try:
+        return str(file_path.relative_to(base_path))
+    except (ValueError, TypeError):
+        return file_path.name
+
 def find_class(name, search_path):
     results = []
-    root = Path(search_path)
-    py_files = list(root.rglob("*.py")) if root.is_dir() else [root]
+    root = Path(search_path).resolve()
+    
+    if root.is_dir():
+        py_files = list(root.rglob("*.py"))
+    elif root.is_file():
+        py_files = [root]
+    else:
+        return f"❌ Path not found: {search_path}"
     
     for file_path in py_files:
         try:
@@ -163,17 +190,18 @@ def find_class(name, search_path):
                     # Get docstring
                     docstring = ast.get_docstring(node) or "No docstring"
                     
+                    rel_path = safe_relative_path(file_path, root)
                     results.append(f"""
-📍 {file_path.relative_to(Path.cwd())}:{node.lineno}
+📍 {rel_path}:{node.lineno}
    Class: {name}{inheritance}
    Methods: {', '.join(methods[:10])}{"..." if len(methods) > 10 else ""}
    Docstring: {docstring[:100]}{"..." if len(docstring) > 100 else ""}
 """)
         except Exception:
-            continue
+            pass
     
     if not results:
-        return f"❌ Class '{name}' not found"
+        return f"❌ Class '{name}' not found in {search_path}"
     
     return "\\n".join(results)
 
@@ -198,10 +226,23 @@ import sys
 import ast
 from pathlib import Path
 
+def safe_relative_path(file_path, base_path):
+    """Safely get relative path, fallback to filename if it fails"""
+    try:
+        return str(file_path.relative_to(base_path))
+    except (ValueError, TypeError):
+        return file_path.name
+
 def find_usages(symbol, search_path):
     results = []
-    root = Path(search_path)
-    py_files = list(root.rglob("*.py")) if root.is_dir() else [root]
+    root = Path(search_path).resolve()
+    
+    if root.is_dir():
+        py_files = list(root.rglob("*.py"))
+    elif root.is_file():
+        py_files = [root]
+    else:
+        return f"❌ Path not found: {search_path}"
     
     for file_path in py_files:
         try:
@@ -210,25 +251,28 @@ def find_usages(symbol, search_path):
                 content = ''.join(lines)
             
             tree = ast.parse(content, filename=str(file_path))
+            rel_path = safe_relative_path(file_path, root)
             
             for node in ast.walk(tree):
                 if isinstance(node, ast.Name) and node.id == symbol:
                     line_no = node.lineno
                     context = lines[line_no - 1].strip() if line_no <= len(lines) else ""
-                    results.append(f"  {file_path.relative_to(Path.cwd())}:{line_no} - {context[:80]}")
+                    results.append(f"  {rel_path}:{line_no} - {context[:80]}")
                 
                 elif isinstance(node, ast.Call):
                     if isinstance(node.func, ast.Name) and node.func.id == symbol:
                         line_no = node.lineno
                         context = lines[line_no - 1].strip() if line_no <= len(lines) else ""
-                        results.append(f"  {file_path.relative_to(Path.cwd())}:{line_no} - {context[:80]}")
+                        results.append(f"  {rel_path}:{line_no} - {context[:80]}")
         except Exception:
-            continue
+            pass
     
     if not results:
-        return f"❌ No usages found for '{symbol}'"
+        return f"❌ No usages found for '{symbol}' in {search_path}"
     
-    return f"Found {len(results)} usage(s) of '{symbol}':\\n" + "\\n".join(results[:50])
+    # Deduplicate and limit results
+    unique_results = list(dict.fromkeys(results))
+    return f"Found {len(unique_results)} usage(s) of '{symbol}':\\n" + "\\n".join(unique_results[:50])
 
 if __name__ == "__main__":
     print(find_usages(sys.argv[1], sys.argv[2]))
@@ -252,12 +296,24 @@ import ast
 from pathlib import Path
 from collections import defaultdict
 
+def safe_relative_path(file_path, base_path):
+    """Safely get relative path, fallback to filename if it fails"""
+    try:
+        return str(file_path.relative_to(base_path))
+    except (ValueError, TypeError):
+        return file_path.name
+
 def analyze_calls(search_path):
     call_graph = defaultdict(set)
     definitions = {}
+    root = Path(search_path).resolve()
     
-    root = Path(search_path)
-    py_files = list(root.rglob("*.py")) if root.is_dir() else [root]
+    if root.is_dir():
+        py_files = list(root.rglob("*.py"))
+    elif root.is_file():
+        py_files = [root]
+    else:
+        return {}, {}
     
     for file_path in py_files:
         try:
@@ -265,11 +321,12 @@ def analyze_calls(search_path):
                 content = f.read()
             
             tree = ast.parse(content, filename=str(file_path))
+            rel_path = safe_relative_path(file_path, root)
             
             # Find all function definitions
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef):
-                    definitions[node.name] = str(file_path.relative_to(Path.cwd()))
+                    definitions[node.name] = rel_path
                     
                     # Find calls within this function
                     for child in ast.walk(node):
@@ -277,7 +334,7 @@ def analyze_calls(search_path):
                             if isinstance(child.func, ast.Name):
                                 call_graph[node.name].add(child.func.id)
         except Exception:
-            continue
+            pass
     
     return call_graph, definitions
 
@@ -307,7 +364,7 @@ if __name__ == "__main__":
     call_graph, definitions = analyze_calls(search_path)
     
     if func_name not in definitions:
-        print(f"❌ Function '{func_name}' not found")
+        print(f"❌ Function '{func_name}' not found in {search_path}")
     else:
         print(f"Call graph for '{func_name}':\\n")
         print("\\n".join(build_graph(func_name, call_graph, definitions)))
@@ -332,8 +389,11 @@ from collections import defaultdict
 
 def analyze_imports(search_path):
     import_graph = defaultdict(set)
+    root = Path(search_path).resolve()
     
-    root = Path(search_path)
+    if not root.is_dir():
+        return {}
+    
     py_files = list(root.rglob("*.py"))
     
     for file_path in py_files:
@@ -342,7 +402,13 @@ def analyze_imports(search_path):
                 content = f.read()
             
             tree = ast.parse(content, filename=str(file_path))
-            module_name = str(file_path.relative_to(root).with_suffix('')).replace('/', '.')
+            
+            # Get module name from file path
+            try:
+                rel_path = file_path.relative_to(root)
+                module_name = str(rel_path.with_suffix('')).replace('/', '.').replace('\\\\', '.')
+            except (ValueError, TypeError):
+                continue
             
             for node in ast.walk(tree):
                 if isinstance(node, ast.Import):
@@ -352,7 +418,7 @@ def analyze_imports(search_path):
                     if node.module:
                         import_graph[module_name].add(node.module)
         except Exception:
-            continue
+            pass
     
     return import_graph
 
@@ -370,7 +436,7 @@ def build_import_tree(module, import_graph, depth=0, visited=None):
     
     if module in import_graph:
         for imported in sorted(import_graph[module]):
-            if imported.startswith('.'):  # Relative import
+            if imported.startswith('.'):  # Skip relative imports
                 continue
             result.extend(build_import_tree(imported, import_graph, depth + 1, visited.copy()))
     
@@ -381,8 +447,13 @@ if __name__ == "__main__":
     
     import_graph = analyze_imports('.')
     
-    print(f"Import tree for '{module}':\\n")
-    print("\\n".join(build_import_tree(module, import_graph)))
+    if not import_graph:
+        print(f"❌ No Python files found or failed to analyze imports")
+    elif module not in import_graph:
+        print(f"❌ Module '{module}' not found in import graph")
+    else:
+        print(f"Import tree for '{module}':\\n")
+        print("\\n".join(build_import_tree(module, import_graph)))
 `;
 
   return executePythonScript(script, [moduleName], engineRoot);
@@ -399,14 +470,25 @@ export async function findDeadCode(
 import sys
 import ast
 from pathlib import Path
-from collections import defaultdict
+
+def safe_relative_path(file_path, base_path):
+    """Safely get relative path, fallback to filename if it fails"""
+    try:
+        return str(file_path.relative_to(base_path))
+    except (ValueError, TypeError):
+        return file_path.name
 
 def find_dead_code(search_path):
     definitions = set()
     usages = set()
+    root = Path(search_path).resolve()
     
-    root = Path(search_path)
-    py_files = list(root.rglob("*.py")) if root.is_dir() else [root]
+    if root.is_dir():
+        py_files = list(root.rglob("*.py"))
+    elif root.is_file():
+        py_files = [root]
+    else:
+        return f"❌ Path not found: {search_path}"
     
     # First pass: find all definitions
     for file_path in py_files:
@@ -415,16 +497,17 @@ def find_dead_code(search_path):
                 content = f.read()
             
             tree = ast.parse(content, filename=str(file_path))
+            rel_path = safe_relative_path(file_path, root)
             
             for node in ast.walk(tree):
                 if isinstance(node, ast.FunctionDef):
                     if not node.name.startswith('_'):  # Skip private
-                        definitions.add((node.name, str(file_path.relative_to(Path.cwd())), node.lineno))
+                        definitions.add((node.name, rel_path, node.lineno))
                 elif isinstance(node, ast.ClassDef):
                     if not node.name.startswith('_'):
-                        definitions.add((node.name, str(file_path.relative_to(Path.cwd())), node.lineno))
+                        definitions.add((node.name, rel_path, node.lineno))
         except Exception:
-            continue
+            pass
     
     # Second pass: find all usages
     for file_path in py_files:
@@ -440,7 +523,7 @@ def find_dead_code(search_path):
                 elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
                     usages.add(node.func.id)
         except Exception:
-            continue
+            pass
     
     # Find unused definitions
     unused = []
@@ -507,16 +590,28 @@ def analyze_file(file_path):
                 else:
                     level = "❌ High"
                 
-                results.append(f"  {node.name:30} | Complexity: {complexity:2} | {level}")
+                # Format with proper padding
+                name_padded = node.name[:40].ljust(40)
+                results.append({
+                    'name': node.name,
+                    'complexity': complexity,
+                    'level': level,
+                    'display': f"  {name_padded} | Complexity: {complexity:2} | {level}"
+                })
         
         if not results:
             return "No functions found"
         
-        results.sort(key=lambda x: int(x.split('|')[1].split(':')[1].strip().split()[0]), reverse=True)
-        return "\\n".join(results[:20])
+        # Sort by complexity (descending)
+        results.sort(key=lambda x: x['complexity'], reverse=True)
+        return "\\n".join([r['display'] for r in results[:20]])
         
+    except FileNotFoundError:
+        return f"❌ File not found: {file_path}"
+    except SyntaxError as e:
+        return f"❌ Syntax error in file: {e}"
     except Exception as e:
-        return f"Error analyzing file: {str(e)}"
+        return f"❌ Error analyzing file: {str(e)}"
 
 if __name__ == "__main__":
     print(analyze_file(sys.argv[1]))
@@ -537,8 +632,14 @@ import sys
 from pathlib import Path
 
 def analyze_codebase(search_path):
-    root = Path(search_path)
-    py_files = list(root.rglob("*.py")) if root.is_dir() else [root]
+    root = Path(search_path).resolve()
+    
+    if root.is_dir():
+        py_files = list(root.rglob("*.py"))
+    elif root.is_file():
+        py_files = [root]
+    else:
+        return f"❌ Path not found: {search_path}"
     
     total_lines = 0
     code_lines = 0
@@ -566,7 +667,7 @@ def analyze_codebase(search_path):
                         elif stripped.startswith('class '):
                             class_count += 1
         except Exception:
-            continue
+            pass
     
     comment_ratio = (comment_lines / total_lines * 100) if total_lines > 0 else 0
     
