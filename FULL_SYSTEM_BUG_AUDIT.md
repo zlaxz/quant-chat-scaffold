@@ -2,13 +2,13 @@
 
 **Date**: 2025-01-19  
 **Scope**: Comprehensive application-wide audit (Phases 1-5)  
-**Status**: 🔴 7 CRITICAL BUGS FOUND → ✅ ALL FIXED
+**Status**: 🔴 8 CRITICAL BUGS FOUND → ✅ ALL FIXED
 
 ---
 
 ## Executive Summary
 
-Comprehensive audit across all application layers (frontend, edge functions, MCP tools, database operations, LLM routing) revealed **7 critical bugs** that could cause runtime errors, data corruption, or inconsistent behavior. All bugs have been fixed with proper error handling, validation, and safety measures.
+Comprehensive audit across all application layers (frontend, edge functions, MCP tools, database operations, LLM routing) revealed **8 critical bugs** that could cause runtime errors, data corruption, or inconsistent behavior. All bugs have been fixed with proper error handling, validation, and safety measures.
 
 ---
 
@@ -188,6 +188,48 @@ required_functions = ["generate_signal", "get_params"]
 
 ---
 
+### 🔴 BUG #8: Backtest Get .single() Query Crash
+**Severity**: CRITICAL  
+**Location**: `supabase/functions/backtest-get/index.ts` (line 39)  
+**Impact**: Runtime error when user provides invalid backtest run ID
+
+**Problem**:
+```typescript
+// WRONG: Throws error if no data found
+const { data, error } = await supabase
+  .from('backtest_runs')
+  .eq('id', id)
+  .single();
+
+if (error) {
+  throw new Error(`Failed to fetch backtest run: ${error.message}`);
+}
+```
+
+**Fix**:
+```typescript
+// CORRECT: Returns null if no data
+const { data, error } = await supabase
+  .from('backtest_runs')
+  .eq('id', id)
+  .maybeSingle();
+
+if (error) {
+  throw new Error(`Failed to fetch backtest run: ${error.message}`);
+}
+
+if (!data) {
+  return new Response(
+    JSON.stringify({ error: 'Backtest run not found' }),
+    { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  );
+}
+```
+
+**Result**: Graceful handling of missing runs with clear error messages
+
+---
+
 ## Additional Issues Found
 
 ### 🟡 MINOR: Missing Date Validation in runBacktest
@@ -267,7 +309,7 @@ required_functions = ["generate_signal", "get_params"]
 
 ## Conclusion
 
-**Application is now production-ready** after fixing 5 critical bugs. Two remaining issues require user decisions:
+**Application is now production-ready** after fixing 8 critical bugs. Two remaining issues require user decisions:
 
 1. **Delete legacy chat/index.ts?** (Currently unused but could cause confusion)
 2. **Verify strategy validation requirements** (May not match your actual rotation-engine interface)
