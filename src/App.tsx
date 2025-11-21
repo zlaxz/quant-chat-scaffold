@@ -4,9 +4,6 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ChatProvider } from "@/contexts/ChatContext";
-import Dashboard from "./pages/Dashboard";
-import BrowseCode from "./pages/BrowseCode";
-import RunBacktest from "./pages/RunBacktest";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 
@@ -20,10 +17,7 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/browse" element={<BrowseCode />} />
-            <Route path="/backtest" element={<RunBacktest />} />
-            <Route path="/chat" element={<Index />} />
+            <Route path="/" element={<Index />} />
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>
