@@ -134,7 +134,7 @@ export const RunComparisonPanel = ({
   ).sort();
 
   const chartData = allDates.map(date => {
-    const point: any = { date };
+    const point: Record<string, string | number | null> = { date };
     normalizedData.forEach((run, idx) => {
       const dataPoint = run.data.find(p => p.date === date);
       point[`run${idx}`] = dataPoint?.normalizedValue || null;
@@ -210,10 +210,10 @@ export const RunComparisonPanel = ({
               <tr className="border-b border-border/50">
                 <td className="py-2 font-mono text-muted-foreground">CAGR</td>
                 {selectedRuns.map((run, idx) => {
-                  const metrics = run.metrics as any || {};
+                  const metrics = run.metrics as BacktestMetrics | null;
                   return (
                     <td key={idx} className="text-right py-2 font-semibold">
-                      {metrics.cagr !== undefined ? `${(metrics.cagr * 100).toFixed(2)}%` : 'N/A'}
+                      {metrics?.cagr !== undefined ? `${(metrics.cagr * 100).toFixed(2)}%` : 'N/A'}
                     </td>
                   );
                 })}
@@ -221,10 +221,10 @@ export const RunComparisonPanel = ({
               <tr className="border-b border-border/50">
                 <td className="py-2 font-mono text-muted-foreground">Sharpe</td>
                 {selectedRuns.map((run, idx) => {
-                  const metrics = run.metrics as any || {};
+                  const metrics = run.metrics as BacktestMetrics | null;
                   return (
                     <td key={idx} className="text-right py-2 font-semibold">
-                      {metrics.sharpe !== undefined ? metrics.sharpe.toFixed(2) : 'N/A'}
+                      {metrics?.sharpe !== undefined ? metrics.sharpe.toFixed(2) : 'N/A'}
                     </td>
                   );
                 })}
@@ -232,10 +232,10 @@ export const RunComparisonPanel = ({
               <tr className="border-b border-border/50">
                 <td className="py-2 font-mono text-muted-foreground">Max Drawdown</td>
                 {selectedRuns.map((run, idx) => {
-                  const metrics = run.metrics as any || {};
+                  const metrics = run.metrics as BacktestMetrics | null;
                   return (
                     <td key={idx} className="text-right py-2 font-semibold text-destructive">
-                      {metrics.max_drawdown !== undefined ? `${(metrics.max_drawdown * 100).toFixed(2)}%` : 'N/A'}
+                      {metrics?.max_drawdown !== undefined ? `${(metrics.max_drawdown * 100).toFixed(2)}%` : 'N/A'}
                     </td>
                   );
                 })}
@@ -243,10 +243,10 @@ export const RunComparisonPanel = ({
               <tr className="border-b border-border/50">
                 <td className="py-2 font-mono text-muted-foreground">Win Rate</td>
                 {selectedRuns.map((run, idx) => {
-                  const metrics = run.metrics as any || {};
+                  const metrics = run.metrics as BacktestMetrics | null;
                   return (
                     <td key={idx} className="text-right py-2 font-semibold">
-                      {metrics.win_rate !== undefined ? `${(metrics.win_rate * 100).toFixed(1)}%` : 'N/A'}
+                      {metrics?.win_rate !== undefined ? `${(metrics.win_rate * 100).toFixed(1)}%` : 'N/A'}
                     </td>
                   );
                 })}
@@ -254,10 +254,10 @@ export const RunComparisonPanel = ({
               <tr>
                 <td className="py-2 font-mono text-muted-foreground">Total Trades</td>
                 {selectedRuns.map((run, idx) => {
-                  const metrics = run.metrics as any || {};
+                  const metrics = run.metrics as BacktestMetrics | null;
                   return (
                     <td key={idx} className="text-right py-2 font-semibold">
-                      {metrics.total_trades || 'N/A'}
+                      {metrics?.total_trades || 'N/A'}
                     </td>
                   );
                 })}
@@ -298,7 +298,7 @@ export const RunComparisonPanel = ({
               />
               <Legend 
                 wrapperStyle={{ fontSize: '10px' }}
-                formatter={(value, entry: any, index) => normalizedData[index]?.label || value}
+                formatter={(value, _entry, index) => normalizedData[index]?.label || value}
               />
               {normalizedData.map((_, idx) => (
                 <Line

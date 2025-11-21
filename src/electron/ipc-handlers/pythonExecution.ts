@@ -14,8 +14,6 @@ export function registerPythonExecutionHandlers() {
     profileConfig?: Record<string, any>;
   }) => {
     try {
-      console.log('Running backtest:', params);
-
       // Build Python command using cli_wrapper.py
       const cmd = [
         'python3',
@@ -54,7 +52,6 @@ export function registerPythonExecutionHandlers() {
       });
 
       if (exitCode !== 0) {
-        console.error('Backtest failed:', stderr);
         return {
           success: false,
           error: stderr || 'Backtest process failed',
@@ -66,9 +63,6 @@ export function registerPythonExecutionHandlers() {
       try {
         results = JSON.parse(stdout);
       } catch (parseError) {
-        console.error('Failed to parse Python output as JSON:', parseError);
-        console.error('Raw stdout:', stdout);
-        console.error('Raw stderr:', stderr);
         return {
           success: false,
           error: `Failed to parse backtest results: ${parseError instanceof Error ? parseError.message : 'Invalid JSON'}`,
