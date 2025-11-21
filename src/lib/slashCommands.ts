@@ -2004,6 +2004,164 @@ async function handleTradeDetail(args: string, _context: CommandContext): Promis
 }
 
 /**
+ * /generate_docstrings command - auto-generate docstrings for Python file
+ * Usage: /generate_docstrings path:<path>
+ */
+async function handleGenerateDocstrings(args: string, _context: CommandContext): Promise<CommandResult> {
+  const pathMatch = args.match(/path:(\S+)/);
+  
+  if (!pathMatch) {
+    return {
+      success: false,
+      message: 'Usage: /generate_docstrings path:<path>\nExample: /generate_docstrings path:strategies/skew.py',
+    };
+  }
+  
+  const path = pathMatch[1];
+  
+  try {
+    const { data, error } = await supabase.functions.invoke('workspace-init-prompt', {
+      body: {
+        tool: 'generate_docstrings',
+        args: { path }
+      }
+    });
+    
+    if (error) throw error;
+    
+    return {
+      success: true,
+      message: data.result || 'Docstrings generated',
+      data
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: `❌ Failed to generate docstrings: ${error.message}`,
+    };
+  }
+}
+
+/**
+ * /generate_readme command - generate README for module
+ * Usage: /generate_readme path:<path>
+ */
+async function handleGenerateReadme(args: string, _context: CommandContext): Promise<CommandResult> {
+  const pathMatch = args.match(/path:(\S+)/);
+  
+  if (!pathMatch) {
+    return {
+      success: false,
+      message: 'Usage: /generate_readme path:<path>\nExample: /generate_readme path:strategies or /generate_readme path:profiles/skew.py',
+    };
+  }
+  
+  const path = pathMatch[1];
+  
+  try {
+    const { data, error } = await supabase.functions.invoke('workspace-init-prompt', {
+      body: {
+        tool: 'generate_readme',
+        args: { path }
+      }
+    });
+    
+    if (error) throw error;
+    
+    return {
+      success: true,
+      message: data.result || 'README generated',
+      data
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: `❌ Failed to generate README: ${error.message}`,
+    };
+  }
+}
+
+/**
+ * /create_strategy command - generate strategy template
+ * Usage: /create_strategy name:<name>
+ */
+async function handleCreateStrategy(args: string, _context: CommandContext): Promise<CommandResult> {
+  const nameMatch = args.match(/name:(\S+)/);
+  
+  if (!nameMatch) {
+    return {
+      success: false,
+      message: 'Usage: /create_strategy name:<name>\nExample: /create_strategy name:my_strategy_v1',
+    };
+  }
+  
+  const name = nameMatch[1];
+  
+  try {
+    const { data, error } = await supabase.functions.invoke('workspace-init-prompt', {
+      body: {
+        tool: 'create_strategy',
+        args: { name }
+      }
+    });
+    
+    if (error) throw error;
+    
+    return {
+      success: true,
+      message: data.result || 'Strategy template created',
+      data
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: `❌ Failed to create strategy: ${error.message}`,
+    };
+  }
+}
+
+/**
+ * /create_profile command - generate profile template
+ * Usage: /create_profile strategy:<key> name:<name>
+ */
+async function handleCreateProfile(args: string, _context: CommandContext): Promise<CommandResult> {
+  const strategyMatch = args.match(/strategy:(\S+)/);
+  const nameMatch = args.match(/name:(\S+)/);
+  
+  if (!strategyMatch || !nameMatch) {
+    return {
+      success: false,
+      message: 'Usage: /create_profile strategy:<key> name:<name>\nExample: /create_profile strategy:skew name:aggressive_v1',
+    };
+  }
+  
+  const strategyKey = strategyMatch[1];
+  const name = nameMatch[1];
+  
+  try {
+    const { data, error } = await supabase.functions.invoke('workspace-init-prompt', {
+      body: {
+        tool: 'create_profile',
+        args: { strategy_key: strategyKey, name }
+      }
+    });
+    
+    if (error) throw error;
+    
+    return {
+      success: true,
+      message: data.result || 'Profile template created',
+      data
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      message: `❌ Failed to create profile: ${error.message}`,
+    };
+  }
+}
+
+/**
  * /help command - show available commands
  */
 async function handleHelp(): Promise<CommandResult> {
@@ -2091,6 +2249,18 @@ async function handleHelp(): Promise<CommandResult> {
       `🔬 /trade_detail id:<runId> idx:<tradeIdx>\n` +
       `   Deep dive on specific trade with market context\n` +
       `   Example: /trade_detail id:abc-123-... idx:5\n\n` +
+      `📝 /generate_docstrings path:<path>\n` +
+      `   Auto-generate numpy-style docstrings for Python file using AI\n` +
+      `   Example: /generate_docstrings path:strategies/skew.py\n\n` +
+      `📘 /generate_readme path:<path>\n` +
+      `   Generate README.md for module or package using AI analysis\n` +
+      `   Example: /generate_readme path:strategies or /generate_readme path:profiles/skew.py\n\n` +
+      `🏗️ /create_strategy name:<name>\n` +
+      `   Generate strategy template with methods, docstrings, and type hints\n` +
+      `   Example: /create_strategy name:my_strategy_v1\n\n` +
+      `📋 /create_profile strategy:<key> name:<name>\n` +
+      `   Generate profile template JSON with parameters and defaults\n` +
+      `   Example: /create_profile strategy:skew name:aggressive_v1\n\n` +
       `❓ /help\n` +
       `   Show this help message`,
   };
@@ -2287,6 +2457,34 @@ export const commands: Record<string, Command> = {
     description: 'Deep dive on specific trade with market context',
     usage: '/trade_detail id:<runId> idx:<tradeIdx>',
     handler: handleTradeDetail,
+    tier: undefined,
+  },
+  generate_docstrings: {
+    name: 'generate_docstrings',
+    description: 'Auto-generate numpy-style docstrings for Python file',
+    usage: '/generate_docstrings path:<path>',
+    handler: handleGenerateDocstrings,
+    tier: undefined,
+  },
+  generate_readme: {
+    name: 'generate_readme',
+    description: 'Generate README for module or package',
+    usage: '/generate_readme path:<path>',
+    handler: handleGenerateReadme,
+    tier: undefined,
+  },
+  create_strategy: {
+    name: 'create_strategy',
+    description: 'Generate strategy template',
+    usage: '/create_strategy name:<name>',
+    handler: handleCreateStrategy,
+    tier: undefined,
+  },
+  create_profile: {
+    name: 'create_profile',
+    description: 'Generate profile template',
+    usage: '/create_profile strategy:<key> name:<name>',
+    handler: handleCreateProfile,
     tier: undefined,
   },
   help: {
