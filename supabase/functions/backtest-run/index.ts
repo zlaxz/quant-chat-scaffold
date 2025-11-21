@@ -94,22 +94,66 @@ function generateFakeResults(strategyKey: string, params: BacktestParams): { met
 }
 
 /**
- * Call external backtest engine if configured
- * Returns null if engine is not configured or call fails
+ * Try local bridge server first, then fall back to configured external engine
+ * The bridge server runs on localhost:8080 and executes rotation-engine Python code
+ * Returns null if no engines are available or all calls fail
  * Validates response structure to match BacktestMetrics and EquityPoint[] types
  */
 async function callExternalEngine(
   strategyKey: string,
   params: BacktestParams
-): Promise<{ metrics: BacktestMetrics; equityCurve: EquityPoint[]; engineSource: string } | null> {
+): Promise<{ metrics: BacktestMetrics; equityCurve: EquityPoint[]; engineSource: string; trades?: any[] } | null> {
+  
+  // 1. Try local bridge server first (localhost:8080)
+  console.log('[Bridge] Attempting to connect to local bridge server...');
+  
+  try {
+    const bridgeResponse = await fetch('http://localhost:8080/backtest', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        strategy_key: strategyKey,
+        params: params
+      }),
+      signal: AbortSignal.timeout(300000), // 5 minute timeout for Python execution
+    });
+    
+    if (bridgeResponse.ok) {
+      const bridgeData = await bridgeResponse.json();
+      
+      if (bridgeData.success) {
+        console.log('[Bridge] ✅ Bridge execution successful');
+        
+        // Validate bridge response
+        if (!bridgeData.metrics || !bridgeData.equity_curve) {
+          console.error('[Bridge] Invalid response - missing metrics or equity_curve');
+        } else {
+          return {
+            metrics: bridgeData.metrics,
+            equityCurve: bridgeData.equity_curve,
+            engineSource: 'rotation-engine-bridge',
+            trades: bridgeData.trades || []
+          };
+        }
+      } else {
+        console.error('[Bridge] Bridge execution failed:', bridgeData.error);
+      }
+    } else {
+      console.log('[Bridge] Bridge server returned non-200:', bridgeResponse.status);
+    }
+  } catch (bridgeError: any) {
+    console.log('[Bridge] Bridge connection failed:', bridgeError.message);
+  }
+  
+  // 2. Fall back to BACKTEST_ENGINE_URL if configured
   const engineUrl = Deno.env.get('BACKTEST_ENGINE_URL');
   
   if (!engineUrl || engineUrl.trim() === '') {
-    console.log('[External Engine] BACKTEST_ENGINE_URL not configured, using stub');
+    console.log('[External Engine] No external engine configured, using stub');
     return null;
   }
 
-  console.log('[External Engine] Attempting to call external engine:', engineUrl);
+  console.log('[External Engine] Attempting to call configured engine:', engineUrl);
 
   try {
     const response = await fetch(`${engineUrl}/run-backtest`, {
@@ -217,33 +261,27 @@ serve(async (req) => {
 
     console.log('[Backtest Run] Created run:', backtestRun.id);
 
-    // 2. Try external engine first, fall back to stub
-    let metrics, equityCurve, engineSource;
+    // 2. Try bridge → external engine → stub fallback
+    let metrics, equityCurve, engineSource, trades;
 
     const externalResult = await callExternalEngine(strategyKey, params);
     
     if (externalResult) {
-      // External engine succeeded
+      // Bridge or external engine succeeded
       metrics = externalResult.metrics;
       equityCurve = externalResult.equityCurve;
       engineSource = externalResult.engineSource;
-      console.log('[Backtest Run] Using external engine results');
+      trades = externalResult.trades || [];
+      console.log('[Backtest Run] Using results from:', engineSource);
     } else {
       // Fall back to stub
-      const engineUrl = Deno.env.get('BACKTEST_ENGINE_URL');
-      if (engineUrl && engineUrl.trim() !== '') {
-        // External engine was configured but failed
-        console.log('[Backtest Run] External engine failed, falling back to stub');
-        engineSource = 'stub_fallback';
-      } else {
-        // External engine not configured
-        console.log('[Backtest Run] Using stub (no external engine configured)');
-        engineSource = 'stub';
-      }
+      console.log('[Backtest Run] All engines unavailable, using stub');
+      engineSource = 'stub_fallback';
       
       const stubResults = generateFakeResults(strategyKey, params);
       metrics = stubResults.metrics;
       equityCurve = stubResults.equityCurve;
+      trades = [];
     }
 
     // 3. Update record with results
@@ -289,7 +327,7 @@ serve(async (req) => {
           params,
           metrics,
           equity_curve: equityCurve,
-          trades: [], // Stub - will be populated by external engine
+          trades: trades || [],
           engine_source: engineSource,
           created_at: completedRun.completed_at
         };
