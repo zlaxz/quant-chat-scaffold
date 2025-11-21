@@ -32,9 +32,6 @@ export interface RunSwarmParams {
 export async function runSwarm(params: RunSwarmParams): Promise<SwarmResult[]> {
   const { sessionId, workspaceId, prompts, model } = params;
 
-  console.log(`[Swarm Client] Running ${prompts.length} prompts in parallel...`);
-  console.log(`[Swarm Client] Using ${isRunningInElectron() ? 'Electron IPC' : 'edge function'}`);
-
   if (isRunningInElectron()) {
     // Use Electron direct API calls
     const electronPrompts = prompts.map((p, idx) => ({
@@ -60,15 +57,12 @@ export async function runSwarm(params: RunSwarmParams): Promise<SwarmResult[]> {
   });
 
   if (error) {
-    console.error('[Swarm Client] Error:', error);
     throw new Error(`Swarm execution failed: ${error.message}`);
   }
 
   if (!data || !data.results) {
     throw new Error('Invalid response from swarm: missing results');
   }
-
-  console.log(`[Swarm Client] Received ${data.results.length} results`);
 
   return data.results as SwarmResult[];
 }
