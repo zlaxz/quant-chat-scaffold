@@ -34,8 +34,6 @@ export type WriteConfirmationCallback = (
  */
 export async function executeWriteOperation(operation: WriteOperation): Promise<WriteResult> {
   try {
-    console.log('Executing write operation:', operation);
-    
     const { data, error } = await supabase.functions.invoke('write-file', {
       body: operation
     });
@@ -403,8 +401,6 @@ function logWriteOperation(operation: WriteOperation, result: WriteResult): void
   }
   
   localStorage.setItem('write_operations_log', JSON.stringify(logs));
-  
-  console.log('Write operation logged:', logEntry);
 }
 
 /**

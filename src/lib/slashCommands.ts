@@ -229,7 +229,7 @@ async function handleRuns(args: string, context: CommandContext): Promise<Comman
     const runsList = data.map((run, idx) => {
       const date = new Date(run.started_at || Date.now()).toLocaleDateString();
       const status = run.status === 'completed' ? '✅' : run.status === 'failed' ? '❌' : '⏳';
-      const metrics = run.metrics as any || {};
+      const metrics = run.metrics || {};
       
       let summary = `${idx + 1}. ${status} ${run.strategy_key} (${date})`;
       
@@ -1264,7 +1264,6 @@ async function handleAutoAnalyze(args: string, context: CommandContext): Promise
     ];
 
     // Execute all agents in parallel via SWARM_MODEL
-    console.log(`[Auto-Analyze] Running ${swarmPrompts.length} research agents in parallel...`);
     const swarmResults = await runSwarm({
       sessionId: context.sessionId,
       workspaceId: context.workspaceId,
