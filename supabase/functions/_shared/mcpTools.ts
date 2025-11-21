@@ -26,6 +26,12 @@ import {
   calculateComplexity,
   generateCodeStats
 } from './analysisOperations.ts';
+import {
+  runBatchBacktest,
+  runParameterSweep,
+  runRegressionTest,
+  runCrossValidation
+} from './automationOperations.ts';
 
 export interface McpTool {
   name: string;
@@ -651,6 +657,171 @@ export const MCP_TOOLS: McpTool[] = [
         }
       }
     }
+  },
+  
+  // Phase 5: Workflow Automation
+  {
+    name: 'batch_backtest',
+    description: 'Run multiple backtests in parallel with a parameter grid. Returns ranked results by Sharpe ratio.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        strategy_key: {
+          type: 'string',
+          description: 'Strategy key to backtest'
+        },
+        param_grid: {
+          type: 'object',
+          description: 'Parameter grid as JSON object with param names as keys and arrays of values. Max 100 combinations.',
+          additionalProperties: { type: 'array' }
+        },
+        start_date: {
+          type: 'string',
+          description: 'Start date in YYYY-MM-DD format'
+        },
+        end_date: {
+          type: 'string',
+          description: 'End date in YYYY-MM-DD format'
+        },
+        capital: {
+          type: 'number',
+          description: 'Initial capital for backtest (default: 100000)'
+        },
+        session_id: {
+          type: 'string',
+          description: 'Optional session ID to link results'
+        }
+      },
+      required: ['strategy_key', 'param_grid', 'start_date', 'end_date']
+    }
+  },
+  {
+    name: 'sweep_params',
+    description: 'Sweep a single parameter across a range. Returns metrics curve vs parameter value.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        strategy_key: {
+          type: 'string',
+          description: 'Strategy key to backtest'
+        },
+        param_name: {
+          type: 'string',
+          description: 'Name of the parameter to sweep'
+        },
+        start: {
+          type: 'number',
+          description: 'Starting value for parameter'
+        },
+        end: {
+          type: 'number',
+          description: 'Ending value for parameter'
+        },
+        step: {
+          type: 'number',
+          description: 'Step size for parameter sweep'
+        },
+        start_date: {
+          type: 'string',
+          description: 'Start date in YYYY-MM-DD format'
+        },
+        end_date: {
+          type: 'string',
+          description: 'End date in YYYY-MM-DD format'
+        },
+        capital: {
+          type: 'number',
+          description: 'Initial capital for backtest (default: 100000)'
+        },
+        session_id: {
+          type: 'string',
+          description: 'Optional session ID to link results'
+        }
+      },
+      required: ['strategy_key', 'param_name', 'start', 'end', 'step', 'start_date', 'end_date']
+    }
+  },
+  {
+    name: 'regression_test',
+    description: 'Run regression test comparing current strategy to a historical benchmark run. Detects performance degradation.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        strategy_key: {
+          type: 'string',
+          description: 'Strategy key to test'
+        },
+        benchmark_run_id: {
+          type: 'string',
+          description: 'UUID of benchmark backtest run'
+        },
+        current_params: {
+          type: 'object',
+          description: 'Current strategy parameters to test',
+          additionalProperties: true
+        },
+        start_date: {
+          type: 'string',
+          description: 'Start date in YYYY-MM-DD format'
+        },
+        end_date: {
+          type: 'string',
+          description: 'End date in YYYY-MM-DD format'
+        },
+        capital: {
+          type: 'number',
+          description: 'Initial capital for backtest (default: 100000)'
+        },
+        session_id: {
+          type: 'string',
+          description: 'Optional session ID to link results'
+        }
+      },
+      required: ['strategy_key', 'benchmark_run_id', 'current_params', 'start_date', 'end_date']
+    }
+  },
+  {
+    name: 'cross_validate',
+    description: 'Run walk-forward cross-validation to detect overfitting. Splits data into in-sample/out-of-sample folds.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        strategy_key: {
+          type: 'string',
+          description: 'Strategy key to validate'
+        },
+        params: {
+          type: 'object',
+          description: 'Strategy parameters',
+          additionalProperties: true
+        },
+        start_date: {
+          type: 'string',
+          description: 'Start date in YYYY-MM-DD format'
+        },
+        end_date: {
+          type: 'string',
+          description: 'End date in YYYY-MM-DD format'
+        },
+        capital: {
+          type: 'number',
+          description: 'Initial capital for backtest (default: 100000)'
+        },
+        in_sample_ratio: {
+          type: 'number',
+          description: 'Ratio of in-sample to total (default: 0.7)'
+        },
+        num_folds: {
+          type: 'number',
+          description: 'Number of folds (default: 5)'
+        },
+        session_id: {
+          type: 'string',
+          description: 'Optional session ID to link results'
+        }
+      },
+      required: ['strategy_key', 'params', 'start_date', 'end_date']
+    }
   }
 ];
 
@@ -776,6 +947,18 @@ export async function executeMcpTool(
       
       case 'code_stats':
         return await executeCodeStats(args.path, engineRoot);
+      
+      case 'batch_backtest':
+        return await executeBatchBacktest(args, engineRoot);
+      
+      case 'sweep_params':
+        return await executeSweepParams(args, engineRoot);
+      
+      case 'regression_test':
+        return await executeRegressionTest(args, engineRoot);
+      
+      case 'cross_validate':
+        return await executeCrossValidate(args, engineRoot);
       
       default:
         return {
@@ -1139,4 +1322,208 @@ async function executeCodeStats(path: string | undefined, engineRoot: string): P
     return { content: [{ type: 'text', text: result.error }], isError: true };
   }
   return { content: [{ type: 'text', text: result.output }] };
+}
+
+// Phase 5: Workflow Automation Executors
+
+async function executeBatchBacktest(args: any, engineRoot: string): Promise<McpToolResult> {
+  try {
+    // Create Supabase client
+    const supabaseClient = {
+      functions: {
+        invoke: async (name: string, options: any) => {
+          const response = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/${name}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+            },
+            body: JSON.stringify(options.body)
+          });
+          const data = await response.json();
+          return { data, error: response.ok ? null : data };
+        }
+      }
+    };
+
+    const result = await runBatchBacktest(
+      supabaseClient,
+      args.strategy_key,
+      args.param_grid,
+      {
+        startDate: args.start_date,
+        endDate: args.end_date,
+        capital: args.capital || 100000,
+        sessionId: args.session_id
+      }
+    );
+
+    if (!result.success) {
+      return { content: [{ type: 'text', text: result.summary }], isError: true };
+    }
+
+    return { content: [{ type: 'text', text: result.summary }] };
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `Batch backtest error: ${error instanceof Error ? error.message : String(error)}` }],
+      isError: true
+    };
+  }
+}
+
+async function executeSweepParams(args: any, engineRoot: string): Promise<McpToolResult> {
+  try {
+    const supabaseClient = {
+      functions: {
+        invoke: async (name: string, options: any) => {
+          const response = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/${name}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+            },
+            body: JSON.stringify(options.body)
+          });
+          const data = await response.json();
+          return { data, error: response.ok ? null : data };
+        }
+      }
+    };
+
+    const result = await runParameterSweep(
+      supabaseClient,
+      args.strategy_key,
+      args.param_name,
+      args.start,
+      args.end,
+      args.step,
+      {
+        startDate: args.start_date,
+        endDate: args.end_date,
+        capital: args.capital || 100000,
+        sessionId: args.session_id
+      }
+    );
+
+    if (!result.success) {
+      return { content: [{ type: 'text', text: result.summary }], isError: true };
+    }
+
+    return { content: [{ type: 'text', text: result.summary }] };
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `Parameter sweep error: ${error instanceof Error ? error.message : String(error)}` }],
+      isError: true
+    };
+  }
+}
+
+async function executeRegressionTest(args: any, engineRoot: string): Promise<McpToolResult> {
+  try {
+    const supabaseClient = {
+      functions: {
+        invoke: async (name: string, options: any) => {
+          const response = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/${name}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+            },
+            body: JSON.stringify(options.body)
+          });
+          const data = await response.json();
+          return { data, error: response.ok ? null : data };
+        }
+      },
+      from: (table: string) => ({
+        select: (columns: string) => ({
+          eq: (column: string, value: any) => ({
+            single: async () => {
+              const response = await fetch(
+                `${Deno.env.get('SUPABASE_URL')}/rest/v1/${table}?${column}=eq.${value}&select=${columns}`,
+                {
+                  headers: {
+                    'apikey': Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '',
+                    'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+                  }
+                }
+              );
+              const data = await response.json();
+              return { data: data[0], error: response.ok ? null : data };
+            }
+          })
+        })
+      })
+    };
+
+    const result = await runRegressionTest(
+      supabaseClient,
+      args.strategy_key,
+      args.benchmark_run_id,
+      args.current_params,
+      {
+        startDate: args.start_date,
+        endDate: args.end_date,
+        capital: args.capital || 100000,
+        sessionId: args.session_id
+      }
+    );
+
+    if (!result.success) {
+      return { content: [{ type: 'text', text: result.summary }], isError: true };
+    }
+
+    return { content: [{ type: 'text', text: result.summary }] };
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `Regression test error: ${error instanceof Error ? error.message : String(error)}` }],
+      isError: true
+    };
+  }
+}
+
+async function executeCrossValidate(args: any, engineRoot: string): Promise<McpToolResult> {
+  try {
+    const supabaseClient = {
+      functions: {
+        invoke: async (name: string, options: any) => {
+          const response = await fetch(`${Deno.env.get('SUPABASE_URL')}/functions/v1/${name}`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')}`
+            },
+            body: JSON.stringify(options.body)
+          });
+          const data = await response.json();
+          return { data, error: response.ok ? null : data };
+        }
+      }
+    };
+
+    const result = await runCrossValidation(
+      supabaseClient,
+      args.strategy_key,
+      args.params,
+      {
+        startDate: args.start_date,
+        endDate: args.end_date,
+        capital: args.capital || 100000,
+        inSampleRatio: args.in_sample_ratio || 0.7,
+        numFolds: args.num_folds || 5,
+        sessionId: args.session_id
+      }
+    );
+
+    if (!result.success) {
+      return { content: [{ type: 'text', text: result.summary }], isError: true };
+    }
+
+    return { content: [{ type: 'text', text: result.summary }] };
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `Cross-validation error: ${error instanceof Error ? error.message : String(error)}` }],
+      isError: true
+    };
+  }
 }

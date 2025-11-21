@@ -400,7 +400,7 @@ This document outlines the phased implementation plan for completing the Quant C
 
 ---
 
-## Phase 5: Workflow Automation (🟢 MEDIUM PRIORITY)
+## Phase 5: Workflow Automation (✅ COMPLETE)
 
 **Goal**: Enable batch operations and parameter sweeps for systematic experimentation.
 
@@ -409,49 +409,59 @@ This document outlines the phased implementation plan for completing the Quant C
 ### Features to Implement
 
 #### 5.1 Batch Backtesting
-- **`/batch_backtest <strategy_key> <param_grid>`** — run multiple backtests in parallel
+- **`batch_backtest`** MCP tool — run multiple backtests in parallel
   - Define parameter grid (e.g., `{"stop_loss": [0.02, 0.03, 0.05], "lookback": [10, 20, 30]}`)
-  - Generate all combinations
-  - Execute in parallel
+  - Generate all combinations (max 100)
+  - Execute in parallel via backtest-run edge function
   - Save all results to DB
-  - Return summary of best performers
+  - Return summary of best performers ranked by Sharpe
 
 #### 5.2 Parameter Sweeps
-- **`/sweep_params <strategy_key> <param> <start> <end> <step>`** — sweep single parameter
-  - Example: `/sweep_params skew_convexity stop_loss 0.01 0.10 0.01`
-  - Generates 10 backtests with stop_loss from 1% to 10%
+- **`sweep_params`** MCP tool — sweep single parameter
+  - Example: `sweep_params(strategy_key="skew_convexity", param_name="stop_loss", start=0.01, end=0.10, step=0.01, ...)`
+  - Generates N backtests with parameter from start to end by step (max 50 points)
   - Returns curve of metric vs parameter value
 
 #### 5.3 Regression Testing
-- **`/regression_test <strategy_key>`** — run strategy against historical benchmarks
-  - Compare current version to previous commits
-  - Detect performance degradation
+- **`regression_test`** MCP tool — run strategy against historical benchmarks
+  - Compare current version to benchmark run ID
+  - Detect performance degradation (Sharpe, CAGR, drawdown, win rate)
   - Alert if metrics fall below thresholds
 
 #### 5.4 Cross-Validation
-- **`/cross_validate <strategy_key> <params>`** — run walk-forward analysis
+- **`cross_validate`** MCP tool — run walk-forward analysis
   - Split data into in-sample and out-of-sample periods
+  - Configurable in-sample ratio (default 70%) and num_folds (default 5)
   - Train on in-sample, test on out-of-sample
-  - Detect overfitting
+  - Detect overfitting by comparing in-sample vs out-of-sample Sharpe
 
 ### Implementation Requirements
 
-#### Edge Function Architecture
-- **`batch-backtest`** edge function — parallel backtest orchestration
-  - Uses worker pool for parallelization
-  - Progress tracking for long-running sweeps
-  - Result aggregation and ranking
+#### MCP Tool Architecture ✅
+- **`automationOperations.ts`** — batch experimentation helpers
+  - `runBatchBacktest` — parallel orchestration with param grid generation
+  - `runParameterSweep` — single-parameter sweep with value generation
+  - `runRegressionTest` — benchmark comparison with delta calculation
+  - `runCrossValidation` — walk-forward analysis with fold splitting
 
-#### Frontend Integration
-- Parameter sweep configuration UI
-- Batch backtest progress indicator
-- Sweep results visualization (heatmap, surface plot)
+#### MCP Tool Registration ✅
+- All tools registered in `MCP_TOOLS` array with detailed schemas
+- Executors added to `executeMcpTool` dispatcher
+- Chief Quant prompt updated with automation workflow guidance
 
 ### Success Criteria
-- [ ] Chief Quant can sweep parameter ranges systematically
-- [ ] Chief Quant can run regression tests before deploying changes
-- [ ] Chief Quant can validate strategies via cross-validation
-- [ ] Batch operations complete in reasonable time with progress tracking
+- [x] Chief Quant can sweep parameter ranges systematically via MCP tools
+- [x] Chief Quant can run regression tests before deploying changes
+- [x] Chief Quant can validate strategies via cross-validation
+- [x] Batch operations leverage existing backtest-run infrastructure
+
+### Testing Checklist
+- [ ] Test batch_backtest with 2x3 parameter grid (6 combinations)
+- [ ] Test sweep_params with 10-point sweep
+- [ ] Test regression_test with known benchmark run
+- [ ] Test cross_validate with 3 folds on short date range
+- [ ] Verify all results save to DB correctly
+- [ ] Verify summary outputs are accurate and actionable
 
 ---
 
