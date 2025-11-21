@@ -38,6 +38,12 @@ import {
   getTradeLog,
   getTradeDetail
 } from './dataInspectionOperations.ts';
+import {
+  generateDocstrings,
+  generateReadme,
+  createStrategy,
+  createProfile
+} from './documentationOperations.ts';
 
 export interface McpTool {
   name: string;
@@ -904,6 +910,66 @@ export const MCP_TOOLS: McpTool[] = [
       },
       required: ['run_id', 'trade_idx']
     }
+  },
+  {
+    name: 'generate_docstrings',
+    description: 'Auto-generate numpy-style docstrings for undocumented functions in a Python file using LLM',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Path to Python file (e.g., "strategies/skew_convexity.py")'
+        }
+      },
+      required: ['path']
+    }
+  },
+  {
+    name: 'generate_readme',
+    description: 'Generate README.md for a module or package using LLM analysis',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: {
+          type: 'string',
+          description: 'Path to module file or directory (e.g., "strategies" or "strategies/skew.py")'
+        }
+      },
+      required: ['path']
+    }
+  },
+  {
+    name: 'create_strategy',
+    description: 'Generate strategy template with required methods, docstrings, and type hints',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Strategy name in snake_case (e.g., "my_strategy_v1")'
+        }
+      },
+      required: ['name']
+    }
+  },
+  {
+    name: 'create_profile',
+    description: 'Generate profile template JSON with parameters, risk management, and backtest defaults',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        strategy_key: {
+          type: 'string',
+          description: 'Strategy key this profile is for'
+        },
+        name: {
+          type: 'string',
+          description: 'Profile name in snake_case (e.g., "aggressive_v1")'
+        }
+      },
+      required: ['strategy_key', 'name']
+    }
   }
 ];
 
@@ -1053,6 +1119,18 @@ export async function executeMcpTool(
       
       case 'get_trade_detail':
         return await executeGetTradeDetail(args.run_id, args.trade_idx, engineRoot);
+      
+      case 'generate_docstrings':
+        return await executeGenerateDocstrings(args.path, engineRoot);
+      
+      case 'generate_readme':
+        return await executeGenerateReadme(args.path, engineRoot);
+      
+      case 'create_strategy':
+        return await executeCreateStrategy(args.name, engineRoot);
+      
+      case 'create_profile':
+        return await executeCreateProfile(args.strategy_key, args.name, engineRoot);
       
       default:
         return {
@@ -1776,6 +1854,120 @@ async function executeGetTradeDetail(runId: string, tradeIdx: number, engineRoot
   } catch (error) {
     return {
       content: [{ type: 'text', text: `Trade detail error: ${error instanceof Error ? error.message : String(error)}` }],
+      isError: true
+    };
+  }
+}
+
+// ==================== Phase 7: Documentation Generation Executors ====================
+
+async function executeGenerateDocstrings(path: string, engineRoot: string): Promise<McpToolResult> {
+  try {
+    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
+    if (!lovableApiKey) {
+      return {
+        content: [{ type: 'text', text: 'LOVABLE_API_KEY not configured. Documentation generation requires Lovable AI.' }],
+        isError: true
+      };
+    }
+
+    const result = await generateDocstrings(path, engineRoot, lovableApiKey);
+    
+    if (!result.success) {
+      return {
+        content: [{ type: 'text', text: result.error || 'Unknown error' }],
+        isError: true
+      };
+    }
+    
+    let output = result.summary || 'Docstrings generated';
+    if (result.preview) {
+      output += '\n\nPreview:\n' + result.preview;
+    }
+    
+    return { content: [{ type: 'text', text: output }] };
+    
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `Docstring generation error: ${error instanceof Error ? error.message : String(error)}` }],
+      isError: true
+    };
+  }
+}
+
+async function executeGenerateReadme(path: string, engineRoot: string): Promise<McpToolResult> {
+  try {
+    const lovableApiKey = Deno.env.get('LOVABLE_API_KEY');
+    if (!lovableApiKey) {
+      return {
+        content: [{ type: 'text', text: 'LOVABLE_API_KEY not configured. Documentation generation requires Lovable AI.' }],
+        isError: true
+      };
+    }
+
+    const result = await generateReadme(path, engineRoot, lovableApiKey);
+    
+    if (!result.success) {
+      return {
+        content: [{ type: 'text', text: result.error || 'Unknown error' }],
+        isError: true
+      };
+    }
+    
+    let output = `README generated: ${result.readme_path}\n\n`;
+    if (result.content) {
+      output += result.content;
+    }
+    
+    return { content: [{ type: 'text', text: output }] };
+    
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `README generation error: ${error instanceof Error ? error.message : String(error)}` }],
+      isError: true
+    };
+  }
+}
+
+async function executeCreateStrategy(name: string, engineRoot: string): Promise<McpToolResult> {
+  try {
+    const result = await createStrategy(name, engineRoot);
+    
+    if (!result.success) {
+      return {
+        content: [{ type: 'text', text: result.error || 'Unknown error' }],
+        isError: true
+      };
+    }
+    
+    const output = `Strategy template created: ${result.file_path}\n\n${result.content}`;
+    return { content: [{ type: 'text', text: output }] };
+    
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `Strategy creation error: ${error instanceof Error ? error.message : String(error)}` }],
+      isError: true
+    };
+  }
+}
+
+async function executeCreateProfile(strategyKey: string, name: string, engineRoot: string): Promise<McpToolResult> {
+  try {
+    const result = await createProfile(strategyKey, name, engineRoot);
+    
+    if (!result.success) {
+      return {
+        content: [{ type: 'text', text: result.error || 'Unknown error' }],
+        isError: true
+      };
+    }
+    
+    const output = `Profile template created: ${result.file_path}\n\n${result.content}`;
+    return { content: [{ type: 'text', text: output }] };
+    
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `Profile creation error: ${error instanceof Error ? error.message : String(error)}` }],
       isError: true
     };
   }
