@@ -36,7 +36,7 @@ serve(async (req) => {
       .from('backtest_runs')
       .select('*')
       .eq('id', id)
-      .single();
+      .maybeSingle();
 
     if (error) {
       console.error('[Backtest Get] Fetch error:', error);
