@@ -108,7 +108,7 @@ export function registerLlmHandlers() {
       }
 
       const completion = await openaiClient.chat.completions.create({
-        model: 'gpt-5-mini-2025-08-07',
+        model: 'gpt-5-mini',
         messages,
       });
 

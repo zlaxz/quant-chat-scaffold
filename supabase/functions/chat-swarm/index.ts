@@ -230,7 +230,7 @@ serve(async (req) => {
         role: 'user',
         content,
         provider: 'openai',
-        model: model || 'gpt-5-2025-08-07'
+        model: model || 'gpt-5.1'
       });
 
     if (userMessageError) {
