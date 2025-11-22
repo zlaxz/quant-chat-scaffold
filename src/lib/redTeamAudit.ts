@@ -131,7 +131,7 @@ Now synthesize this into a final Code Audit Report.`;
   
   try {
     // Call PRIMARY chat for synthesis via electronClient
-    const { content } = await chatPrimary([{ role: 'user', content: synthesisPrompt }]);
+    const { content } = await chatPrimary({ sessionId, workspaceId, content: synthesisPrompt });
     synthesizedReport = content;
   } catch (err: unknown) {
     const errorMessage = err instanceof Error ? err.message : String(err);
