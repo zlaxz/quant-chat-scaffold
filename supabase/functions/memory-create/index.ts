@@ -36,12 +36,25 @@ serve(async (req) => {
     const embedding = await generateEmbedding(content);
     
     if (!embedding) {
-      console.warn('Failed to generate embedding, saving note without embedding');
+      console.error('Failed to generate embedding for memory note');
+      return new Response(
+        JSON.stringify({ error: 'Failed to generate embedding. Memory note was not saved. Please try again.' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
     }
 
     // Initialize Supabase client
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    
+    if (!supabaseUrl || !supabaseKey) {
+      console.error('SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not configured');
+      return new Response(
+        JSON.stringify({ error: 'Server configuration error' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Insert memory note with embedding, type, and importance

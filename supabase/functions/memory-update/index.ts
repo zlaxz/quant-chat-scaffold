@@ -44,8 +44,17 @@ serve(async (req) => {
     console.log(`Updating memory note ${noteId}`);
 
     // Initialize Supabase client
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    
+    if (!supabaseUrl || !supabaseKey) {
+      console.error('SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not configured');
+      return new Response(
+        JSON.stringify({ error: 'CONFIG_ERROR', message: 'Server configuration error' }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Fetch existing note to get previous content and embedding
@@ -58,31 +67,42 @@ serve(async (req) => {
     if (fetchError) {
       console.error('Error fetching existing note:', fetchError);
       return new Response(
-        JSON.stringify({ error: 'Failed to fetch note for update' }),
+        JSON.stringify({ error: 'DATABASE_ERROR', message: 'Failed to fetch note for update' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     if (!existingNote) {
       return new Response(
-        JSON.stringify({ error: 'Note not found' }),
+        JSON.stringify({ error: 'NOT_FOUND', message: 'Note not found' }),
         { status: 404, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    // Build update object
-    const updateData: any = {};
+    // Build update object with audit tracking
+    const updateData: Record<string, unknown> = {};
+    const changedFields: string[] = [];
 
-    if (content !== undefined) {
-      updateData.content = content.trim();
+    if (content !== undefined && content !== null) {
+      const trimmedContent = String(content).trim();
+      if (!trimmedContent) {
+        return new Response(
+          JSON.stringify({ error: 'VALIDATION_ERROR', message: 'Content cannot be empty' }),
+          { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      }
+      
+      updateData.content = trimmedContent;
+      changedFields.push('content');
       
       // If content changed, try to regenerate embedding
-      if (content.trim() !== existingNote.content) {
+      if (trimmedContent !== existingNote.content) {
         console.log('Content changed, regenerating embedding...');
-        const newEmbedding = await generateEmbedding(content.trim());
+        const newEmbedding = await generateEmbedding(trimmedContent);
         
         if (newEmbedding) {
           updateData.embedding = newEmbedding;
+          changedFields.push('embedding');
         } else {
           console.warn('Failed to regenerate embedding, keeping previous embedding if exists');
           // Keep existing embedding by not updating it
@@ -92,19 +112,26 @@ serve(async (req) => {
 
     if (memoryType !== undefined) {
       updateData.memory_type = memoryType;
+      changedFields.push('memory_type');
     }
 
     if (importance !== undefined) {
       updateData.importance = importance;
+      changedFields.push('importance');
     }
 
     if (tags !== undefined) {
       updateData.tags = tags;
+      changedFields.push('tags');
     }
 
     if (archived !== undefined) {
       updateData.archived = archived;
+      changedFields.push('archived');
     }
+
+    // Log audit trail
+    console.log(`Updating note ${noteId}: changed fields = ${changedFields.join(', ')}`);
 
     // updated_at will be set automatically by trigger
 
@@ -119,15 +146,15 @@ serve(async (req) => {
     if (error) {
       console.error('Error updating memory note:', error);
       return new Response(
-        JSON.stringify({ error: 'Failed to update memory note' }),
+        JSON.stringify({ error: 'DATABASE_ERROR', message: 'Failed to update memory note' }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
-    console.log(`Memory note updated: ${data.id}`);
+    console.log(`Memory note updated: ${data.id} (changed: ${changedFields.join(', ')})`);
 
     return new Response(
-      JSON.stringify({ success: true, note: data }),
+      JSON.stringify({ success: true, note: data, changedFields }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   } catch (error) {

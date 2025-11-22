@@ -38,35 +38,45 @@ serve(async (req) => {
     if (!queryEmbedding) {
       console.error('Failed to generate query embedding');
       return new Response(
-        JSON.stringify({ error: 'Failed to generate embedding for query', results: [] }),
+        JSON.stringify({ error: 'EMBEDDING_FAILED', message: 'Failed to generate embedding for query', results: [] }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
 
     // Initialize Supabase client
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    
+    if (!supabaseUrl || !supabaseKey) {
+      console.error('SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY not configured');
+      return new Response(
+        JSON.stringify({ error: 'CONFIG_ERROR', message: 'Server configuration error', results: [] }),
+        { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+    
     const supabase = createClient(supabaseUrl, supabaseKey);
 
     // Use the search_memory_notes database function for semantic search
     // Only search non-archived notes with embeddings
+    const threshold = typeof limit === 'number' && limit > 50 ? 0.5 : 0.5; // Configurable in future
     const { data, error } = await supabase.rpc('search_memory_notes', {
       query_embedding: queryEmbedding,
       match_workspace_id: workspaceId,
-      match_threshold: 0.5, // Adjust threshold as needed (0.5 = 50% similarity minimum)
+      match_threshold: threshold,
       match_count: Math.min(limit, 50), // Cap at 50 for safety
     });
-
-    // Filter out archived notes (additional safety check)
-    const filteredData = data?.filter((note: any) => note.archived !== true) || [];
 
     if (error) {
       console.error('Error searching memory notes:', error);
       return new Response(
-        JSON.stringify({ error: 'Database search failed', results: [] }),
+        JSON.stringify({ error: 'DATABASE_ERROR', message: 'Database search failed', results: [] }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+
+    // Filter out archived notes (additional safety check)
+    const filteredData = (data || []).filter((note: { archived?: boolean }) => note.archived !== true);
 
     console.log(`Found ${filteredData.length} matching active memory notes`);
 
