@@ -5,6 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { Eye, EyeOff, Save } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
 
 export function APIKeySettings() {
   const { toast } = useToast();
@@ -22,12 +23,20 @@ export function APIKeySettings() {
 
   const loadAPIKeys = async () => {
     try {
-      if (window.electron && 'getAPIKeys' in window.electron) {
-        const keys = await window.electron.getAPIKeys();
-        if (keys) {
-          setGeminiKey(keys.gemini || '');
-          setOpenaiKey(keys.openai || '');
-          setDeepseekKey(keys.deepseek || '');
+      // First try to load from Supabase secrets
+      const supabaseKeys = await supabase.functions.invoke('get-api-keys');
+      if (supabaseKeys.data && !supabaseKeys.error) {
+        setGeminiKey(supabaseKeys.data.gemini || '');
+        setOpenaiKey(supabaseKeys.data.openai || '');
+        setDeepseekKey(supabaseKeys.data.deepseek || '');
+        
+        // Save to local electron store if available
+        if (window.electron && 'setAPIKeys' in window.electron) {
+          await window.electron.setAPIKeys({
+            gemini: supabaseKeys.data.gemini || '',
+            openai: supabaseKeys.data.openai || '',
+            deepseek: supabaseKeys.data.deepseek || '',
+          });
         }
       }
     } catch (error) {
