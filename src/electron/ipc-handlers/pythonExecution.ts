@@ -3,7 +3,9 @@ import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs/promises';
 
-const ROTATION_ENGINE_ROOT = process.env.ROTATION_ENGINE_ROOT || '/Users/zstoc/rotation-engine';
+const ROTATION_ENGINE_ROOT = process.env.ROTATION_ENGINE_ROOT || (() => {
+  throw new Error('ROTATION_ENGINE_ROOT environment variable is not set');
+})();
 
 export function registerPythonExecutionHandlers() {
   ipcMain.handle('run-backtest', async (_event, params: {

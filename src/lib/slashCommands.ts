@@ -1240,12 +1240,12 @@ async function handleAutoAnalyze(args: string, context: CommandContext): Promise
     // Build summary inputs for agents
     const runsAggregate = buildRunsAggregate(filteredRuns.slice(0, 100));
     const strategyKeys = [...new Set(filteredRuns.map(r => r.strategy_key))];
-    const relevantMemory = buildRelevantMemory(memoryNotes as any, strategyKeys);
+    const relevantMemory = buildRelevantMemory(memoryNotes as unknown as any, strategyKeys);
     const riskRunSummary = buildRiskRunSummary(filteredRuns);
-    const riskMemorySummary = buildRiskMemorySummary(memoryNotes as any);
+    const riskMemorySummary = buildRiskMemorySummary(memoryNotes as unknown as any);
     const experimentRunSummary = buildExperimentRunSummary(filteredRuns);
-    const experimentMemorySummary = buildExperimentMemorySummary(memoryNotes as any);
-    const curationSummary = buildCurationSummary(memoryNotes as any);
+    const experimentMemorySummary = buildExperimentMemorySummary(memoryNotes as unknown as any);
+    const curationSummary = buildCurationSummary(memoryNotes as unknown as any);
 
     // Build swarm prompts for parallel execution
     const swarmPrompts: SwarmPrompt[] = [

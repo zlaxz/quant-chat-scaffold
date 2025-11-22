@@ -113,8 +113,8 @@ export function buildRunPortfolioSummary(runs: BacktestRun[]): string {
   const dateRanges = runs
     .filter(r => r.params && typeof r.params === 'object' && 'startDate' in r.params && 'endDate' in r.params)
     .map(r => {
-      const params = r.params as any;
-      return { start: params.startDate, end: params.endDate };
+      const params = r.params as unknown as Record<string, unknown>;
+      return { start: String(params.startDate), end: String(params.endDate) };
     });
 
   const uniqueYears = new Set<number>();

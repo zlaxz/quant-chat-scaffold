@@ -93,7 +93,10 @@ async function callGemini(model: string, messages: ChatMessage[], enableTools: b
 
   // Add MCP tools if enabled
   const tools = enableTools ? getMcpToolsForLlm() : undefined;
-  const engineRoot = Deno.env.get('ROTATION_ENGINE_ROOT') || '/Users/zstoc/rotation-engine';
+  const engineRoot = Deno.env.get('ROTATION_ENGINE_ROOT');
+  if (!engineRoot) {
+    throw new Error('ROTATION_ENGINE_ROOT environment variable is not set');
+  }
 
   // Prepare base payload
   const payload: any = {
@@ -215,7 +218,10 @@ async function callOpenAI(model: string, messages: ChatMessage[], enableTools: b
   }
 
   const tools = enableTools ? getMcpToolsForLlm() : undefined;
-  const engineRoot = Deno.env.get('ROTATION_ENGINE_ROOT') || '/Users/zstoc/rotation-engine';
+  const engineRoot = Deno.env.get('ROTATION_ENGINE_ROOT');
+  if (!engineRoot) {
+    throw new Error('ROTATION_ENGINE_ROOT environment variable is not set');
+  }
 
   // If no tools, simple completion
   if (!tools) {
@@ -301,7 +307,10 @@ async function callDeepSeek(model: string, messages: ChatMessage[], enableTools:
   }
 
   const tools = enableTools ? getMcpToolsForLlm() : undefined;
-  const engineRoot = Deno.env.get('ROTATION_ENGINE_ROOT') || '/Users/zstoc/rotation-engine';
+  const engineRoot = Deno.env.get('ROTATION_ENGINE_ROOT');
+  if (!engineRoot) {
+    throw new Error('ROTATION_ENGINE_ROOT environment variable is not set');
+  }
 
   // If no tools, simple completion
   if (!tools) {
