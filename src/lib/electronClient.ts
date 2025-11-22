@@ -1,3 +1,5 @@
+/// <reference types="../types/electron" />
+
 /**
  * Hybrid Client - Routes to Electron IPC or Supabase edge functions
  * 
@@ -105,10 +107,10 @@ export async function runBacktest(params: {
 }
 
 // LLM Operations - can optionally use Electron for lower latency
-export async function chatPrimary(messages: Array<{ role: string; content: string }>): Promise<{ content: string; provider: string; model: string }> {
+export async function chatPrimary(params: { sessionId: string; workspaceId: string; content: string }): Promise<{ content: string; provider: string; model: string }> {
   if (isElectron) {
     try {
-      return await window.electron.chatPrimary(messages);
+      return await window.electron.chatPrimary(params.sessionId, params.workspaceId, params.content);
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : 'Unknown error';
       throw new Error(`LLM call failed: ${errorMsg}`);
@@ -116,7 +118,7 @@ export async function chatPrimary(messages: Array<{ role: string; content: strin
   }
   
   const { data, error } = await supabase.functions.invoke('chat-primary', {
-    body: { messages },
+    body: { sessionId: params.sessionId, workspaceId: params.workspaceId, content: params.content },
   });
   
   if (error) throw new Error(`LLM call failed: ${error.message}`);

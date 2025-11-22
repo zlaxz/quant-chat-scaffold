@@ -134,7 +134,11 @@ export const ChatArea = () => {
         }
       } else {
         // Regular chat message - call PRIMARY chat function via electronClient
-        await chatPrimary([{ role: 'user', content: messageContent }]);
+        await chatPrimary({
+          sessionId: selectedSessionId,
+          workspaceId: selectedWorkspaceId,
+          content: messageContent
+        });
 
         // Reload messages to show both user and assistant messages
         await loadMessages();
