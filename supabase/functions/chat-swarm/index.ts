@@ -243,7 +243,8 @@ serve(async (req) => {
     // 5. Call SWARM tier LLM (DeepSeek-Reasoner)
     console.log('[Chat API - SWARM] Calling SWARM tier LLM with', messages.length, 'messages');
     const llmMessages: LlmChatMessage[] = messages.map(m => ({ role: m.role, content: m.content }));
-    const assistantResponse = await callLlm('swarm', llmMessages);
+    // Enable MCP tools for SWARM tier (same capabilities as PRIMARY)
+    const assistantResponse = await callLlm('swarm', llmMessages, true);
 
     // 6. Save assistant message to database
     console.log('[Chat API - SWARM] Saving assistant response to database');
