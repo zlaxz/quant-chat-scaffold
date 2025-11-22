@@ -1,9 +1,34 @@
 /**
  * Research Agent Prompts for /auto_analyze Swarm Orchestration
- * 
+ *
  * These prompts are designed for SWARM_MODEL execution, providing
  * focused, self-contained analysis tasks for parallel execution.
+ *
+ * Updated: 2025-11-22 - Added 6-regime and 6-profile framework context
  */
+
+// Shared framework context for all research agents
+const FRAMEWORK_CONTEXT = `
+## Framework Context
+
+### The 6 Market Regimes
+1. **Trend Up** (vol compression) - momentum, low vol
+2. **Trend Down** (vol expansion) - fear, high vol
+3. **Vol Compression / Pinned** - low realized vol, range-bound
+4. **Vol Expansion / Breaking Vol** - regime transition, vol spike
+5. **Choppy / Mean-Reverting** - no clear trend, oscillation
+6. **Event / Catalyst** - known events (earnings, FOMC, etc.)
+
+### The 6 Convexity Profiles
+1. **Long-dated gamma efficiency** (45-120 DTE)
+2. **Short-dated gamma spike** (0-7 DTE)
+3. **Charm/decay dominance**
+4. **Vanna** (vol-spot correlation)
+5. **Skew convexity**
+6. **Vol-of-vol convexity**
+
+**Key Insight:** 6 regimes × 6 profiles = rotation opportunities.
+`;
 
 /**
  * Pattern Miner Agent
@@ -17,6 +42,9 @@ export function buildPatternMinerAgentPrompt(
   const scopeNote = scope ? `\n\n**Focus**: ${scope}` : '';
 
   return `# Pattern Miner Agent${scopeNote}
+
+**Stakes:** Real capital at risk. Patterns you identify inform trading decisions.
+${FRAMEWORK_CONTEXT}
 
 Your task: Identify recurring structural patterns across multiple backtest runs.
 
@@ -65,6 +93,8 @@ export function buildCuratorAgentPrompt(
 
   return `# Memory Curator Agent${scopeNote}
 
+**Stakes:** Memory informs all trading decisions. Institutional knowledge matters.
+${FRAMEWORK_CONTEXT}
 Your task: Review workspace memory and suggest structural improvements.
 
 ## Current Memory
@@ -110,6 +140,8 @@ export function buildRiskAgentPrompt(
 
   return `# Risk Officer Agent${scopeNote}
 
+**Stakes:** Real capital. Family financial security. Your job is to PREVENT disasters.
+${FRAMEWORK_CONTEXT}
 Your task: Identify structural risks, vulnerabilities, and rule violations.
 
 ## Run Data
@@ -160,6 +192,8 @@ export function buildExperimentAgentPrompt(
 
   return `# Experiment Director Agent${scopeNote}
 
+**Stakes:** Every experiment costs real resources. Focus on maximum learning per test.
+${FRAMEWORK_CONTEXT}
 Your task: Design 5-8 concrete next experiments to maximize learning.
 
 ## Run Data

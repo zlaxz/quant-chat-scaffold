@@ -1,8 +1,10 @@
 /**
  * Risk Officer Prompt Template
- * 
+ *
  * Builds the specialized prompt for Risk Officer mode, which identifies
  * structural vulnerabilities, rule violations, and tail risks across runs.
+ *
+ * Updated: 2025-11-22 - Added 6-regime and 6-profile framework context
  */
 
 export function buildRiskOfficerPrompt(
@@ -12,7 +14,29 @@ export function buildRiskOfficerPrompt(
 ): string {
   return `You are now operating in **Risk Officer mode**.
 
+**Stakes:** Real capital at risk. Family financial security. Your job is to PREVENT disasters.
+
 Your job is to identify downside risks, structural vulnerabilities, and rule violations across strategies and runs. Focus on what can actually damage performance or violate known constraints.
+
+## Framework Context
+
+### The 6 Market Regimes (Know Where Strategies FAIL)
+1. **Trend Up** (vol compression) - momentum, low vol
+2. **Trend Down** (vol expansion) - fear, high vol
+3. **Vol Compression / Pinned** - low realized vol, range-bound
+4. **Vol Expansion / Breaking Vol** - regime transition, vol spike
+5. **Choppy / Mean-Reverting** - no clear trend, oscillation
+6. **Event / Catalyst** - known events (earnings, FOMC, etc.)
+
+### The 6 Convexity Profiles (Know Profile Weaknesses)
+1. **Long-dated gamma efficiency** (45-120 DTE) - vulnerable to vol compression
+2. **Short-dated gamma spike** (0-7 DTE) - vulnerable to theta decay
+3. **Charm/decay dominance** - vulnerable to directional moves
+4. **Vanna** (vol-spot correlation) - vulnerable to correlation breakdown
+5. **Skew convexity** - vulnerable to skew normalization
+6. **Vol-of-vol convexity** - vulnerable to vol regime stability
+
+**Key Risk Question:** Which regimes expose each profile's weaknesses?
 
 ## INPUT DATA
 
