@@ -102,12 +102,15 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
 
     setIsSaving(true);
     try {
-      const tags = newNoteTags
-        .split(',')
-        .map(t => t.trim())
-        .filter(t => t.length > 0);
+      // Deduplicate tags
+      const tags = Array.from(new Set(
+        newNoteTags
+          .split(',')
+          .map(t => t.trim())
+          .filter(t => t.length > 0)
+      ));
 
-      const { error } = await supabase.functions.invoke('memory-create', {
+      const { error, data } = await supabase.functions.invoke('memory-create', {
         body: {
           workspaceId: selectedWorkspaceId,
           content: newNoteContent.trim(),
@@ -118,7 +121,15 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        // Handle specific error types
+        if (error.message?.includes('embedding')) {
+          toast.error('Failed to create embedding. Please try again.');
+        } else {
+          toast.error('Failed to save memory note');
+        }
+        throw error;
+      }
 
       toast.success('Memory note saved');
       setNewNoteContent('');
@@ -128,7 +139,6 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
       await loadMemoryNotes();
     } catch (error: any) {
       console.error('Error saving memory note:', error);
-      toast.error('Failed to save memory note');
     } finally {
       setIsSaving(false);
     }
@@ -158,10 +168,13 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
 
     setIsUpdating(true);
     try {
-      const tags = editTags
-        .split(',')
-        .map(t => t.trim())
-        .filter(t => t.length > 0);
+      // Deduplicate tags
+      const tags = Array.from(new Set(
+        editTags
+          .split(',')
+          .map(t => t.trim())
+          .filter(t => t.length > 0)
+      ));
 
       const { error } = await supabase.functions.invoke('memory-update', {
         body: {
@@ -177,7 +190,12 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
 
       toast.success('Memory note updated');
       cancelEdit();
+      
+      // Refresh both main notes and search results if applicable
       await loadMemoryNotes();
+      if (hasSearched && searchQuery.trim()) {
+        await performSemanticSearch();
+      }
     } catch (error: any) {
       console.error('Error updating memory note:', error);
       toast.error('Failed to update memory note');
@@ -199,6 +217,11 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
 
       toast.success(note.archived ? 'Note restored' : 'Note archived');
       await loadMemoryNotes();
+      
+      // Refresh search results if applicable
+      if (hasSearched && searchQuery.trim()) {
+        await performSemanticSearch();
+      }
     } catch (error: any) {
       console.error('Error toggling archive:', error);
       toast.error('Failed to update note');
@@ -222,7 +245,18 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
         },
       });
 
-      if (error) throw error;
+      if (error) {
+        // Handle specific error types
+        const errorData = error as { message?: string; error?: string };
+        if (errorData.error === 'EMBEDDING_FAILED') {
+          toast.error('Failed to process search query. Please try again.');
+        } else if (errorData.error === 'DATABASE_ERROR') {
+          toast.error('Database search failed. Please try again.');
+        } else {
+          toast.error('Failed to search memory');
+        }
+        throw error;
+      }
 
       setSearchResults(data?.results || []);
       
@@ -233,7 +267,6 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
       }
     } catch (error: any) {
       console.error('Error searching memory:', error);
-      toast.error('Failed to search memory');
       setSearchResults([]);
     } finally {
       setIsSearching(false);

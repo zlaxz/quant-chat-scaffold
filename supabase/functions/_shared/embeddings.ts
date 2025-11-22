@@ -20,6 +20,9 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
   }
 
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
     const response = await fetch('https://api.openai.com/v1/embeddings', {
       method: 'POST',
       headers: {
@@ -30,7 +33,10 @@ export async function generateEmbedding(text: string): Promise<number[] | null> 
         model: EMBEDDING_MODEL,
         input: text.trim(),
       }),
+      signal: controller.signal,
     });
+
+    clearTimeout(timeoutId);
 
     if (!response.ok) {
       const errorText = await response.text();
