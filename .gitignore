@@ -10,7 +10,13 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+dist-electron
+release
 *.local
+
+# Session/audit files
+SESSION_STATE.md
+*_BUG_AUDIT_*.md
 
 # Editor directories and files
 .vscode/*
