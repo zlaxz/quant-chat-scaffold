@@ -48,16 +48,16 @@ export function buildExperimentRunSummary(runs: BacktestRun[]): string {
     const metrics: { cagr?: number; sharpe?: number; maxDD?: number }[] = [];
 
     for (const run of strategyRuns) {
-      const params = run.params as any;
+      const params = run.params as unknown as Record<string, unknown>;
       if (params?.startDate && params?.endDate) {
-        dateRanges.push({ start: params.startDate, end: params.endDate });
+        dateRanges.push({ start: String(params.startDate), end: String(params.endDate) });
       }
       if (run.metrics) {
-        const m = run.metrics as any;
+        const m = run.metrics as unknown as Record<string, unknown>;
         metrics.push({
-          cagr: m.cagr,
-          sharpe: m.sharpe,
-          maxDD: m.max_drawdown || m.maxDrawdown,
+          cagr: typeof m.cagr === 'number' ? m.cagr : undefined,
+          sharpe: typeof m.sharpe === 'number' ? m.sharpe : undefined,
+          maxDD: typeof m.max_drawdown === 'number' ? m.max_drawdown : typeof m.maxDrawdown === 'number' ? m.maxDrawdown : undefined,
         });
       }
     }
@@ -117,10 +117,10 @@ export function buildExperimentRunSummary(runs: BacktestRun[]): string {
   
   const allYears = new Set<number>();
   for (const run of runs) {
-    const params = run.params as any;
+    const params = run.params as unknown as Record<string, unknown>;
     if (params?.startDate && params?.endDate) {
-      const startYear = new Date(params.startDate).getFullYear();
-      const endYear = new Date(params.endDate).getFullYear();
+      const startYear = new Date(String(params.startDate)).getFullYear();
+      const endYear = new Date(String(params.endDate)).getFullYear();
       for (let year = startYear; year <= endYear; year++) {
         allYears.add(year);
       }

@@ -161,8 +161,12 @@ export async function getRotationEngineRoot(): Promise<string> {
     return window.electron.getRotationEngineRoot();
   }
   
-  // Fallback to env variable
-  return import.meta.env.VITE_ROTATION_ENGINE_ROOT || '/Users/zstoc/rotation-engine';
+  // Fallback to env variable - must be set in .env
+  const root = import.meta.env.VITE_ROTATION_ENGINE_ROOT;
+  if (!root) {
+    throw new Error('VITE_ROTATION_ENGINE_ROOT environment variable is not set');
+  }
+  return root;
 }
 
 // Helper to check if running in Electron

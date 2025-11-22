@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { AlertCircle, X, Loader2 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { toast } from 'sonner';
 import type { BacktestRun, BacktestParams, BacktestMetrics } from '@/types/backtest';
 
 interface Strategy {
@@ -53,6 +54,7 @@ export const RunComparisonPanel = ({
       setRuns(data || []);
     } catch (error) {
       console.error('Error loading runs:', error);
+      toast.error('Failed to load comparison runs');
     } finally {
       setIsLoading(false);
     }

@@ -104,11 +104,12 @@ async function callExternalEngine(
   params: BacktestParams
 ): Promise<{ metrics: BacktestMetrics; equityCurve: EquityPoint[]; engineSource: string; trades?: any[] } | null> {
   
-  // 1. Try local bridge server first (localhost:8080)
-  console.log('[Bridge] Attempting to connect to local bridge server...');
+  // 1. Try local bridge server first
+  const bridgeUrl = Deno.env.get('BRIDGE_SERVER_URL') || 'http://localhost:8080';
+  console.log(`[Bridge] Attempting to connect to bridge server at ${bridgeUrl}...`);
   
   try {
-    const bridgeResponse = await fetch('http://localhost:8080/backtest', {
+    const bridgeResponse = await fetch(`${bridgeUrl}/backtest`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
