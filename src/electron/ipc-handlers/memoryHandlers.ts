@@ -143,4 +143,55 @@ export function registerMemoryHandlers(): void {
     memoryDaemon.on('memories-extracted', extractionListener);
     memoryDaemon.on('error', errorListener);
   }
+
+  // Analysis and warning handlers (require separate initialization)
+  // These will be registered after analysis modules are initialized in main.ts
+}
+
+// Export function to register analysis handlers (called after modules initialized)
+export function registerAnalysisHandlers(
+  overfittingDetector: any,
+  regimeTagger: any,
+  warningSystem: any,
+  patternDetector: any,
+  staleInjector: any,
+  triggerRecall: any
+): void {
+  // Overfitting detection
+  ipcMain.handle('analysis:check-overfitting', async (_event, runId: string) => {
+    if (!overfittingDetector) return { warnings: [] };
+    // Note: Needs run data passed or fetched
+    return { warnings: [] }; // TODO: Implement
+  });
+
+  // Get pre-backtest warnings
+  ipcMain.handle(
+    'analysis:get-warnings',
+    async (_event, strategy: string, regimeId: number | null, workspaceId: string) => {
+      if (!warningSystem) return null;
+      return await warningSystem.getRelevantWarnings(strategy, regimeId, workspaceId);
+    }
+  );
+
+  // Get stale memories for injection
+  ipcMain.handle('memory:get-stale', async (_event, workspaceId: string) => {
+    if (!staleInjector) return [];
+    return await staleInjector.getStaleMemories(workspaceId);
+  });
+
+  // Trigger-based recall
+  ipcMain.handle('memory:check-triggers', async (_event, message: string, workspaceId: string) => {
+    if (!triggerRecall) return [];
+    return await triggerRecall.checkTriggers(message, workspaceId);
+  });
+
+  // Pattern detection
+  ipcMain.handle('analysis:detect-patterns', async (_event, workspaceId: string) => {
+    if (!patternDetector) return { repeated_lessons: [], regime_patterns: [] };
+    const [repeated, regimePatterns] = await Promise.all([
+      patternDetector.detectRepeatedLessons(workspaceId),
+      patternDetector.detectRegimeProfilePatterns(workspaceId),
+    ]);
+    return { repeated_lessons: repeated, regime_patterns: regimePatterns };
+  });
 }

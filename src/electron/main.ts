@@ -9,9 +9,16 @@ import { createClient } from '@supabase/supabase-js';
 import { registerFileOperationHandlers } from './ipc-handlers/fileOperations';
 import { registerPythonExecutionHandlers } from './ipc-handlers/pythonExecution';
 import { registerLlmHandlers } from './ipc-handlers/llmClient';
-import { registerMemoryHandlers, setMemoryServices } from './ipc-handlers/memoryHandlers';
+import { registerMemoryHandlers, setMemoryServices, registerAnalysisHandlers } from './ipc-handlers/memoryHandlers';
 import { MemoryDaemon } from './memory/MemoryDaemon';
 import { RecallEngine } from './memory/RecallEngine';
+import { OverfittingDetector } from './analysis/overfittingDetector';
+import { RegimeTagger } from './analysis/regimeTagger';
+import { WarningSystem } from './analysis/warningSystem';
+import { PatternDetector } from './analysis/patternDetector';
+import { StaleMemoryInjector } from './memory/staleMemoryInjector';
+import { TriggerRecall } from './memory/triggerRecall';
+import OpenAI from 'openai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -157,6 +164,17 @@ app.whenReady().then(() => {
     minImportance: 0.3,
   });
 
+  // Initialize analysis modules
+  const openaiKey = process.env.OPENAI_API_KEY;
+  const openaiClient = openaiKey ? new OpenAI({ apiKey: openaiKey }) : null;
+
+  const overfittingDetector = new OverfittingDetector(supabase, openaiClient);
+  const regimeTagger = new RegimeTagger(supabase);
+  const warningSystem = new WarningSystem(supabase, openaiClient);
+  const patternDetector = new PatternDetector(supabase);
+  const staleInjector = new StaleMemoryInjector(supabase);
+  const triggerRecall = new TriggerRecall(recallEngine);
+
   // Register all IPC handlers
   registerFileOperationHandlers();
   registerPythonExecutionHandlers();
@@ -167,6 +185,16 @@ app.whenReady().then(() => {
 
   // THEN register memory handlers so they have access to services
   registerMemoryHandlers();
+
+  // Register analysis handlers
+  registerAnalysisHandlers(
+    overfittingDetector,
+    regimeTagger,
+    warningSystem,
+    patternDetector,
+    staleInjector,
+    triggerRecall
+  );
 
   // Start memory daemon and wait for it before creating window
   memoryDaemon.start().then(() => {

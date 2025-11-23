@@ -381,10 +381,34 @@ export class MemoryDaemon extends EventEmitter {
   }
 
   private buildExtractionPrompt(context: string): string {
-    return `You are a trading memory extraction specialist.
+    return `You are a quantitative strategy research memory extraction specialist. Extract BACKTEST INSIGHTS and STATISTICAL PATTERNS, not individual trades.
 
 CONVERSATION CONTEXT:
 ${context.slice(0, 4000)}
+
+Extract memories in these categories:
+- BACKTEST_RESULT: Strategy performance in specific regime (include Sharpe, regime, profile)
+- OVERFITTING_WARNING: Statistical red flags (PBO, WFE, parameter sensitivity)
+- REGIME_INSIGHT: Regime-dependent behaviors
+- PARAMETER_SENSITIVITY: Fragility vs robustness
+- STATISTICAL_PATTERN: Cross-strategy learnings
+- EXECUTION_GOTCHA: Real-world constraints
+
+For each memory:
+{
+  "content": "Full insight with numbers",
+  "summary": "One-line takeaway",
+  "type": "observation|lesson|rule|strategy|mistake|success",
+  "category": "backtest_result|overfitting_warning|regime_insight|parameter_sensitivity|statistical_pattern|execution_gotcha",
+  "importance": 0.0-1.0,
+  "regime_context": {
+    "primary_regime": 1-6 or null,
+    "convexity_profile": 1-6 or null
+  },
+  "confidence": 0.0-1.0
+}
+
+BE AGGRESSIVE - extract ALL statistical insights and regime dependencies.
 
 Return as JSON: {"memories": [...]}`;
   }
