@@ -13,6 +13,48 @@ const SWARM_PROVIDER = 'deepseek';
 // Max tool call iterations to prevent infinite loops
 const MAX_TOOL_ITERATIONS = 10;
 
+// Retry configuration
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
+
+// Retry helper with exponential backoff
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries = MAX_RETRIES,
+  delayMs = RETRY_DELAY_MS
+): Promise<T> {
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+
+      // Check if this is a retryable error
+      const isRetryable =
+        error.status === 429 || // Rate limit
+        error.status === 503 || // Service unavailable
+        error.status === 500 || // Server error
+        error.code === 'ECONNRESET' ||
+        error.code === 'ETIMEDOUT' ||
+        error.message?.includes('network') ||
+        error.message?.includes('timeout');
+
+      if (!isRetryable || attempt === maxRetries) {
+        throw error;
+      }
+
+      // Exponential backoff
+      const delay = delayMs * Math.pow(2, attempt - 1);
+      console.log(`[Retry] Attempt ${attempt}/${maxRetries} failed, retrying in ${delay}ms...`, error.message);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+
+  throw lastError;
+}
+
 // Lazy client getters - read API keys at call time, not module load time
 function getGeminiClient(): GoogleGenerativeAI | null {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -57,25 +99,45 @@ export function registerLlmHandlers() {
         throw new Error('GEMINI_API_KEY not configured. Go to Settings to add your API key.');
       }
 
-      // Get model with tools enabled
+      // Extract system message for Gemini's systemInstruction
+      const systemMessage = messages.find(m => m.role === 'system');
+      const nonSystemMessages = messages.filter(m => m.role !== 'system');
+
+      // Build system instruction with EXPLICIT tool usage directive
+      const toolDirective = `
+
+CRITICAL INSTRUCTION: You have access to tools that let you ACTUALLY read and modify the codebase.
+DO NOT make up file contents or guess at code structure.
+DO NOT describe what you would do - USE THE TOOLS to actually do it.
+ALWAYS use list_directory and read_file to examine code BEFORE answering questions about it.
+When asked about the codebase, your FIRST action should be to use tools to explore it.
+
+Available tools: read_file, list_directory, search_code, write_file, git_status, git_diff, run_tests, etc.
+`;
+
+      const fullSystemInstruction = (systemMessage?.content || '') + toolDirective;
+
+      // Get model with tools enabled and system instruction
       const model = geminiClient.getGenerativeModel({
         model: PRIMARY_MODEL,
         tools: [{ functionDeclarations: ALL_TOOLS }],
+        systemInstruction: fullSystemInstruction,
       });
 
-      // Convert messages to Gemini format
-      const history = messages.slice(0, -1).map(msg => ({
+      // Convert messages to Gemini format (excluding system messages)
+      const history = nonSystemMessages.slice(0, -1).map(msg => ({
         role: msg.role === 'assistant' ? 'model' : 'user',
         parts: [{ text: msg.content }]
       }));
 
-      const lastMessage = messages[messages.length - 1];
+      const lastMessage = nonSystemMessages[nonSystemMessages.length - 1];
       const chat = model.startChat({ history });
 
       // Tool execution loop
-      let response = await chat.sendMessage(lastMessage.content);
+      let response = await withRetry(() => chat.sendMessage(lastMessage.content));
       let iterations = 0;
       let allToolOutputs: string[] = [];
+      let toolCallLog: string[] = []; // Visible log for user
 
       while (iterations < MAX_TOOL_ITERATIONS) {
         const candidate = response.response.candidates?.[0];
@@ -108,6 +170,10 @@ export function registerLlmHandlers() {
 
           console.log(`[Tool] Calling: ${toolName}`, toolArgs);
 
+          // Add to visible log
+          const argsStr = Object.entries(toolArgs).map(([k, v]) => `${k}="${v}"`).join(', ');
+          toolCallLog.push(`🔧 ${toolName}(${argsStr})`);
+
           try {
             const result = await executeTool(toolName, toolArgs);
             const output = result.success ? result.content : `Error: ${result.error}`;
@@ -119,9 +185,14 @@ export function registerLlmHandlers() {
               }
             });
 
+            // Add result preview to log
+            const preview = output.slice(0, 200).replace(/\n/g, ' ');
+            toolCallLog.push(`   → ${result.success ? '✓' : '✗'} ${preview}${output.length > 200 ? '...' : ''}`);
+
             allToolOutputs.push(`[${toolName}]: ${output.slice(0, 500)}${output.length > 500 ? '...' : ''}`);
           } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
+            toolCallLog.push(`   → ✗ Error: ${errorMsg}`);
             toolResults.push({
               functionResponse: {
                 name: toolName,
@@ -132,16 +203,16 @@ export function registerLlmHandlers() {
         }
 
         // Send tool results back to the model
-        response = await chat.sendMessage(toolResults);
+        response = await withRetry(() => chat.sendMessage(toolResults));
         iterations++;
       }
 
       // Get final text response
       const finalText = response.response.text();
 
-      // Include tool outputs in metadata for debugging
-      const toolSummary = allToolOutputs.length > 0
-        ? `\n\n---\n*Tools used: ${iterations} iterations*`
+      // Build visible tool call log
+      const toolSummary = toolCallLog.length > 0
+        ? `\n\n---\n**🔧 Tool Calls (${iterations} iteration${iterations !== 1 ? 's' : ''}):**\n\`\`\`\n${toolCallLog.join('\n')}\n\`\`\``
         : '';
 
       return {
@@ -172,14 +243,15 @@ export function registerLlmHandlers() {
 
       let iterations = 0;
       let finalContent = '';
+      let toolCallLog: string[] = []; // Visible log for user
 
       while (iterations < MAX_TOOL_ITERATIONS) {
-        const completion = await deepseekClient.chat.completions.create({
+        const completion = await withRetry(() => deepseekClient.chat.completions.create({
           model: SWARM_MODEL,
           messages: currentMessages,
           tools: tools,
           tool_choice: 'auto'
-        });
+        }));
 
         const choice = completion.choices[0];
         const message = choice.message;
@@ -213,9 +285,17 @@ export function registerLlmHandlers() {
 
           console.log(`[Tool] Calling: ${toolName}`, toolArgs);
 
+          // Add to visible log
+          const argsStr = Object.entries(toolArgs).map(([k, v]) => `${k}="${v}"`).join(', ');
+          toolCallLog.push(`🔧 ${toolName}(${argsStr})`);
+
           try {
             const result = await executeTool(toolName, toolArgs);
             const output = result.success ? result.content : `Error: ${result.error}`;
+
+            // Add result preview to log
+            const preview = output.slice(0, 200).replace(/\n/g, ' ');
+            toolCallLog.push(`   → ${result.success ? '✓' : '✗'} ${preview}${output.length > 200 ? '...' : ''}`);
 
             currentMessages.push({
               role: 'tool',
@@ -224,6 +304,7 @@ export function registerLlmHandlers() {
             });
           } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
+            toolCallLog.push(`   → ✗ Error: ${errorMsg}`);
             currentMessages.push({
               role: 'tool',
               tool_call_id: toolCall.id,
@@ -235,8 +316,13 @@ export function registerLlmHandlers() {
         iterations++;
       }
 
+      // Build visible tool call log
+      const toolSummary = toolCallLog.length > 0
+        ? `\n\n---\n**🔧 Tool Calls (${iterations} iteration${iterations !== 1 ? 's' : ''}):**\n\`\`\`\n${toolCallLog.join('\n')}\n\`\`\``
+        : '';
+
       return {
-        content: finalContent,
+        content: finalContent + toolSummary,
         provider: SWARM_PROVIDER,
         model: SWARM_MODEL,
         toolsUsed: iterations
@@ -256,13 +342,13 @@ export function registerLlmHandlers() {
       }
 
       const promises = prompts.map(async (prompt) => {
-        const completion = await deepseekClient.chat.completions.create({
+        const completion = await withRetry(() => deepseekClient.chat.completions.create({
           model: SWARM_MODEL,
           messages: prompt.messages.map(m => ({
             role: m.role as 'user' | 'assistant' | 'system',
             content: m.content
           }))
-        });
+        }));
 
         return {
           agentId: prompt.agentId,
@@ -285,13 +371,13 @@ export function registerLlmHandlers() {
         throw new Error('OPENAI_API_KEY not configured. Go to Settings to add your API key.');
       }
 
-      const completion = await openaiClient.chat.completions.create({
+      const completion = await withRetry(() => openaiClient.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: messages.map(m => ({
           role: m.role as 'user' | 'assistant' | 'system',
           content: m.content
         }))
-      });
+      }));
 
       return {
         content: completion.choices[0].message.content || ''

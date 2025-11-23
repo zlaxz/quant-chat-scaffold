@@ -11,6 +11,31 @@ import { glob } from 'glob';
 
 const execAsync = promisify(exec);
 
+// Tool execution timeout (30 seconds)
+const TOOL_TIMEOUT_MS = 30000;
+
+// Wrapper for execAsync with timeout
+async function execWithTimeout(command: string, options?: { cwd?: string }): Promise<{ stdout: string; stderr: string }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TOOL_TIMEOUT_MS);
+
+  try {
+    const result = await execAsync(command, {
+      ...options,
+      signal: controller.signal as any,
+      maxBuffer: 10 * 1024 * 1024, // 10MB buffer
+    });
+    return result;
+  } catch (error: any) {
+    if (error.name === 'AbortError' || error.killed) {
+      throw new Error(`Command timed out after ${TOOL_TIMEOUT_MS / 1000}s: ${command.slice(0, 50)}...`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export interface ToolResult {
   success: boolean;
   content: string;
@@ -22,21 +47,40 @@ function getEngineRoot(): string {
   return process.env.ROTATION_ENGINE_ROOT || path.join(process.env.HOME || '', 'rotation-engine');
 }
 
-// Resolve path relative to engine root
-function resolvePath(relativePath: string): string {
+// Resolve path relative to engine root with security checks
+function resolvePath(relativePath: string): { path: string; error?: string } {
   const root = getEngineRoot();
-  // Handle absolute paths
+
+  // Reject absolute paths for security
   if (path.isAbsolute(relativePath)) {
-    return relativePath;
+    return { path: '', error: `Absolute paths not allowed: ${relativePath}. Use paths relative to project root.` };
   }
-  return path.join(root, relativePath);
+
+  // Normalize and resolve
+  const resolved = path.normalize(path.join(root, relativePath));
+
+  // Security: ensure resolved path is within engine root (prevent ../../ attacks)
+  if (!resolved.startsWith(root)) {
+    return { path: '', error: `Path traversal detected: ${relativePath}. Must stay within project directory.` };
+  }
+
+  return { path: resolved };
+}
+
+// Helper to safely resolve path or return error
+function safeResolvePath(relativePath: string): string {
+  const result = resolvePath(relativePath);
+  if (result.error) {
+    throw new Error(result.error);
+  }
+  return result.path;
 }
 
 // ==================== FILE OPERATIONS ====================
 
 export async function readFile(filePath: string): Promise<ToolResult> {
   try {
-    const fullPath = resolvePath(filePath);
+    const fullPath = safeResolvePath(filePath);
 
     if (!fs.existsSync(fullPath)) {
       return { success: false, content: '', error: `File not found: ${filePath}` };
@@ -55,7 +99,7 @@ export async function readFile(filePath: string): Promise<ToolResult> {
 
 export async function listDirectory(dirPath: string): Promise<ToolResult> {
   try {
-    const fullPath = resolvePath(dirPath || '.');
+    const fullPath = safeResolvePath(dirPath || '.');
 
     if (!fs.existsSync(fullPath)) {
       return { success: false, content: '', error: `Directory not found: ${dirPath}` };
@@ -84,7 +128,7 @@ export async function searchCode(
 ): Promise<ToolResult> {
   try {
     const root = getEngineRoot();
-    const targetPath = searchPath ? resolvePath(searchPath) : root;
+    const targetPath = searchPath ? safeResolvePath(searchPath) : root;
 
     // Use grep for searching
     let grepCmd = `grep -rn "${pattern.replace(/"/g, '\\"')}" "${targetPath}"`;
@@ -96,7 +140,7 @@ export async function searchCode(
     // Exclude common directories
     grepCmd += ' --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=__pycache__ --exclude-dir=.venv';
 
-    const { stdout, stderr } = await execAsync(grepCmd, {
+    const { stdout, stderr } = await execWithTimeout(grepCmd, {
       maxBuffer: 10 * 1024 * 1024,
       cwd: root
     });
@@ -134,7 +178,7 @@ export async function searchCode(
 
 export async function writeFile(filePath: string, content: string): Promise<ToolResult> {
   try {
-    const fullPath = resolvePath(filePath);
+    const fullPath = safeResolvePath(filePath);
     const dir = path.dirname(fullPath);
 
     // Create directory if it doesn't exist
@@ -168,7 +212,7 @@ export async function writeFile(filePath: string, content: string): Promise<Tool
 
 export async function appendFile(filePath: string, content: string): Promise<ToolResult> {
   try {
-    const fullPath = resolvePath(filePath);
+    const fullPath = safeResolvePath(filePath);
 
     if (!fs.existsSync(fullPath)) {
       return { success: false, content: '', error: `File not found: ${filePath}` };
@@ -187,7 +231,7 @@ export async function appendFile(filePath: string, content: string): Promise<Too
 
 export async function deleteFile(filePath: string): Promise<ToolResult> {
   try {
-    const fullPath = resolvePath(filePath);
+    const fullPath = safeResolvePath(filePath);
 
     if (!fs.existsSync(fullPath)) {
       return { success: false, content: '', error: `File not found: ${filePath}` };
@@ -216,7 +260,7 @@ export async function deleteFile(filePath: string): Promise<ToolResult> {
 async function runGitCommand(args: string[]): Promise<ToolResult> {
   try {
     const root = getEngineRoot();
-    const { stdout, stderr } = await execAsync(`git ${args.join(' ')}`, { cwd: root });
+    const { stdout, stderr } = await execWithTimeout(`git ${args.join(' ')}`, { cwd: root });
     return { success: true, content: stdout || stderr || 'Command completed' };
   } catch (error: any) {
     return {
@@ -284,7 +328,7 @@ export async function runTests(testPath?: string, verbose?: boolean): Promise<To
     if (verbose) args.push('-v');
     args.push('--tb=short');
 
-    const { stdout, stderr } = await execAsync(args.join(' '), {
+    const { stdout, stderr } = await execWithTimeout(args.join(' '), {
       cwd: root,
       timeout: 300000 // 5 minute timeout
     });
@@ -303,14 +347,14 @@ export async function runTests(testPath?: string, verbose?: boolean): Promise<To
 export async function validateStrategy(strategyPath: string): Promise<ToolResult> {
   try {
     const root = getEngineRoot();
-    const fullPath = resolvePath(strategyPath);
+    const fullPath = safeResolvePath(strategyPath);
 
     if (!fs.existsSync(fullPath)) {
       return { success: false, content: '', error: `Strategy file not found: ${strategyPath}` };
     }
 
     // Run Python syntax check
-    const { stdout, stderr } = await execAsync(`python -m py_compile "${fullPath}"`, { cwd: root });
+    const { stdout, stderr } = await execWithTimeout(`python -m py_compile "${fullPath}"`, { cwd: root });
 
     // Check for required functions
     const content = fs.readFileSync(fullPath, 'utf-8');
@@ -347,7 +391,7 @@ bt.validate_params('${startDate}', '${endDate}')
 print('Dry run validation passed')
 "`;
 
-    const { stdout, stderr } = await execAsync(cmd, { cwd: root, timeout: 30000 });
+    const { stdout, stderr } = await execWithTimeout(cmd, { cwd: root });
     return { success: true, content: stdout || 'Dry run validation passed' };
   } catch (error: any) {
     return { success: false, content: '', error: `Dry run failed: ${error.message}` };
@@ -357,9 +401,9 @@ print('Dry run validation passed')
 export async function lintCode(filePath: string): Promise<ToolResult> {
   try {
     const root = getEngineRoot();
-    const fullPath = resolvePath(filePath);
+    const fullPath = safeResolvePath(filePath);
 
-    const { stdout, stderr } = await execAsync(`flake8 "${fullPath}" --max-line-length=120`, { cwd: root });
+    const { stdout, stderr } = await execWithTimeout(`flake8 "${fullPath}" --max-line-length=120`, { cwd: root });
 
     if (!stdout && !stderr) {
       return { success: true, content: 'No linting issues found' };
@@ -375,9 +419,9 @@ export async function lintCode(filePath: string): Promise<ToolResult> {
 export async function typeCheck(filePath: string): Promise<ToolResult> {
   try {
     const root = getEngineRoot();
-    const fullPath = resolvePath(filePath);
+    const fullPath = safeResolvePath(filePath);
 
-    const { stdout, stderr } = await execAsync(`mypy "${fullPath}"`, { cwd: root });
+    const { stdout, stderr } = await execWithTimeout(`mypy "${fullPath}"`, { cwd: root });
     return { success: true, content: stdout || 'Type checking passed' };
   } catch (error: any) {
     return { success: false, content: error.stdout || '', error: error.stderr || error.message };
@@ -389,11 +433,11 @@ export async function typeCheck(filePath: string): Promise<ToolResult> {
 export async function findFunction(name: string, searchPath?: string): Promise<ToolResult> {
   try {
     const root = getEngineRoot();
-    const targetPath = searchPath ? resolvePath(searchPath) : root;
+    const targetPath = searchPath ? safeResolvePath(searchPath) : root;
 
     // Use grep to find function definitions
     const pattern = `def ${name}\\(`;
-    const { stdout } = await execAsync(
+    const { stdout } = await execWithTimeout(
       `grep -rn "${pattern}" "${targetPath}" --include="*.py"`,
       { cwd: root }
     );
@@ -414,10 +458,10 @@ export async function findFunction(name: string, searchPath?: string): Promise<T
 export async function findClass(name: string, searchPath?: string): Promise<ToolResult> {
   try {
     const root = getEngineRoot();
-    const targetPath = searchPath ? resolvePath(searchPath) : root;
+    const targetPath = searchPath ? safeResolvePath(searchPath) : root;
 
     const pattern = `class ${name}[\\(:]`;
-    const { stdout } = await execAsync(
+    const { stdout } = await execWithTimeout(
       `grep -rn -E "${pattern}" "${targetPath}" --include="*.py"`,
       { cwd: root }
     );
@@ -442,25 +486,25 @@ export async function findUsages(symbol: string, searchPath?: string): Promise<T
 export async function codeStats(statsPath?: string): Promise<ToolResult> {
   try {
     const root = getEngineRoot();
-    const targetPath = statsPath ? resolvePath(statsPath) : root;
+    const targetPath = statsPath ? safeResolvePath(statsPath) : root;
 
     // Count Python files and lines
-    const { stdout: fileCount } = await execAsync(
+    const { stdout: fileCount } = await execWithTimeout(
       `find "${targetPath}" -name "*.py" -type f | wc -l`,
       { cwd: root }
     );
 
-    const { stdout: lineCount } = await execAsync(
+    const { stdout: lineCount } = await execWithTimeout(
       `find "${targetPath}" -name "*.py" -type f -exec cat {} + | wc -l`,
       { cwd: root }
     );
 
-    const { stdout: funcCount } = await execAsync(
+    const { stdout: funcCount } = await execWithTimeout(
       `grep -r "def " "${targetPath}" --include="*.py" | wc -l`,
       { cwd: root }
     );
 
-    const { stdout: classCount } = await execAsync(
+    const { stdout: classCount } = await execWithTimeout(
       `grep -r "class " "${targetPath}" --include="*.py" | wc -l`,
       { cwd: root }
     );

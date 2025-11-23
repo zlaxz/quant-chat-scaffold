@@ -146,9 +146,20 @@ export const ChatArea = () => {
         setMessages(prev => [...prev, userMessage]);
 
         // Build messages array for LLM (Chief Quant system prompt + history + new message)
+        // Truncate history to stay within context limits (~100k tokens ≈ 400k chars)
+        const MAX_HISTORY_CHARS = 400000;
+        let historyMessages = messages.map(m => ({ role: m.role, content: m.content }));
+
+        // Calculate total chars and truncate from the beginning if needed
+        let totalChars = historyMessages.reduce((sum, m) => sum + m.content.length, 0);
+        while (totalChars > MAX_HISTORY_CHARS && historyMessages.length > 0) {
+          const removed = historyMessages.shift();
+          if (removed) totalChars -= removed.content.length;
+        }
+
         const llmMessages = [
           { role: 'system', content: buildChiefQuantPrompt() },
-          ...messages.map(m => ({ role: m.role, content: m.content })),
+          ...historyMessages,
           { role: 'user', content: messageContent }
         ];
 
@@ -164,12 +175,19 @@ export const ChatArea = () => {
         };
         setMessages(prev => [...prev, assistantMessage]);
 
-        // Save both messages to database (background, non-blocking)
+        // Save both messages to database (background, non-blocking but notify on failure)
         supabase.from('messages').insert([
           { session_id: selectedSessionId, role: 'user', content: messageContent },
           { session_id: selectedSessionId, role: 'assistant', content: response.content, provider: response.provider, model: response.model }
         ]).then(({ error }) => {
-          if (error) console.error('Error saving messages to DB:', error);
+          if (error) {
+            console.error('Error saving messages to DB:', error);
+            toast({
+              title: 'Save Warning',
+              description: 'Messages displayed but failed to save to database. They may not persist.',
+              variant: 'destructive',
+            });
+          }
         });
       }
     } catch (error: any) {
