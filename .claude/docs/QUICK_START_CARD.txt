@@ -1,0 +1,181 @@
+================================================================================
+                    SAFE DATA MIGRATION QUICK START
+                           20 Minutes Total
+================================================================================
+
+PROBLEM:
+  Current migration has: DROP TABLE IF EXISTS memory_notes CASCADE;
+  This DESTROYS data with NO backup.
+
+SOLUTION: Use safe migration (RENAME instead of DROP)
+
+================================================================================
+STEP 1: Read Documentation (5 minutes)
+================================================================================
+
+  Start with ONE of these:
+
+  QUICK VERSION (5 min):
+    Read: /Users/zstoc/GitHub/quant-chat-scaffold/.claude/docs/MIGRATION_QUICK_REFERENCE.md
+
+  COMPLETE VERSION (20 min):
+    1. Read: SAFE_DATA_MIGRATION_STRATEGY.md (this project root)
+    2. Read: MIGRATION_IMPLEMENTATION_GUIDE.md (in .claude/docs/)
+    3. Reference: MIGRATION_DECISION_TREE.md (in .claude/docs/)
+
+  VISUAL VERSION (15 min):
+    1. Read: MIGRATION_DATA_FLOW.md (in .claude/docs/)
+    2. Read: MIGRATION_DECISION_TREE.md (in .claude/docs/)
+
+================================================================================
+STEP 2: Update Migration File (5 minutes)
+================================================================================
+
+  File: /Users/zstoc/GitHub/quant-chat-scaffold/supabase/migrations/20251123000000_enhance_memory_system.sql
+
+  FIND this line (line 5):
+    DROP TABLE IF EXISTS memory_notes CASCADE;
+
+  REPLACE with:
+    CREATE EXTENSION IF NOT EXISTS vector;
+    ALTER TABLE IF EXISTS memory_notes RENAME TO memory_notes_old;
+
+  SAVE file
+
+================================================================================
+STEP 3: Add Migration Logic (5 minutes)
+================================================================================
+
+  After all the CREATE INDEX statements (around line 86):
+
+  COPY contents of:
+    /Users/zstoc/GitHub/quant-chat-scaffold/supabase/migrations/safe_migration_data_transfer.sql
+
+  PASTE into your migration file
+
+  SAVE file
+
+================================================================================
+STEP 4: Deploy (1 minute)
+================================================================================
+
+  Run command:
+    supabase db push
+
+  Watch output for:
+    [Migration] SUCCESS: Migrated N rows to memories table
+    MIGRATION INTEGRITY: PASSED
+    Orphaned rows: 0
+
+  If you see SUCCESS - migration worked!
+
+================================================================================
+STEP 5: Verify (5 minutes)
+================================================================================
+
+  Run these queries in Supabase SQL Editor:
+
+  Query 1: Row counts (should be equal)
+    SELECT COUNT(*) FROM memory_notes_old;
+    SELECT COUNT(*) FROM memories WHERE source = 'migration';
+
+  Query 2: No orphaned rows (should be 0)
+    SELECT COUNT(*) FROM memory_notes_old
+    WHERE id NOT IN (SELECT id FROM memories WHERE source = 'migration');
+
+  Query 3: View migration info
+    SELECT * FROM migration_audit_trail;
+
+  If all pass: Migration SUCCEEDED
+
+================================================================================
+STEP 6: Test Application (5-10 minutes)
+================================================================================
+
+  Test that app works:
+    [ ] Can query memories table
+    [ ] Migrated data appears
+    [ ] Search works
+    [ ] New memory creation works
+    [ ] No errors in logs
+
+  If all pass: Ready for cleanup (optional)
+
+================================================================================
+OPTIONAL: Cleanup (1 minute)
+================================================================================
+
+  ONLY after all above steps pass!
+
+  Run command:
+    supabase db push --file supabase/migrations/20251123000001_cleanup_memory_notes_old.sql
+
+  This removes backup table (memory_notes_old)
+
+  NOTE: Cleanup is optional - you can keep backup indefinitely
+
+================================================================================
+SAFETY GUARANTEES
+================================================================================
+
+  ✓ Data NOT deleted (RENAME, not DROP)
+  ✓ Backup preserved (memory_notes_old table)
+  ✓ Row counts validated (automatic checks)
+  ✓ Rollback available (< 1 minute)
+  ✓ Zero data loss (backup indefinite)
+  ✓ Zero downtime (table renames instant)
+
+================================================================================
+IF SOMETHING GOES WRONG
+================================================================================
+
+  Issue: Row count mismatch
+    → See MIGRATION_IMPLEMENTATION_GUIDE.md (Troubleshooting section)
+    → Backup is preserved - can retry
+
+  Issue: Application error after migration
+    → Rollback (see MIGRATION_IMPLEMENTATION_GUIDE.md)
+    → Takes < 1 minute
+    → No data lost
+
+  Issue: Any other problem
+    → Backup table still exists
+    → Can investigate without rushing
+    → Never had any data loss
+
+================================================================================
+FILES LOCATION
+================================================================================
+
+  Main Strategy:
+    /Users/zstoc/GitHub/quant-chat-scaffold/SAFE_DATA_MIGRATION_STRATEGY.md
+
+  Guides:
+    /Users/zstoc/GitHub/quant-chat-scaffold/.claude/docs/MIGRATION_IMPLEMENTATION_GUIDE.md
+    /Users/zstoc/GitHub/quant-chat-scaffold/.claude/docs/MIGRATION_QUICK_REFERENCE.md
+    /Users/zstoc/GitHub/quant-chat-scaffold/.claude/docs/MIGRATION_DECISION_TREE.md
+    /Users/zstoc/GitHub/quant-chat-scaffold/.claude/docs/MIGRATION_DATA_FLOW.md
+
+  SQL Scripts:
+    /Users/zstoc/GitHub/quant-chat-scaffold/supabase/migrations/safe_migration_data_transfer.sql
+    /Users/zstoc/GitHub/quant-chat-scaffold/supabase/migrations/20251123000001_cleanup_memory_notes_old.sql
+    /Users/zstoc/GitHub/quant-chat-scaffold/supabase/migrations/MIGRATION_VERIFICATION.sql
+
+  Index:
+    /Users/zstoc/GitHub/quant-chat-scaffold/MIGRATION_FILES_INDEX.md
+
+================================================================================
+NEXT STEP
+================================================================================
+
+  1. Read MIGRATION_QUICK_REFERENCE.md (3 minutes)
+  2. Follow the 5 steps above (20 minutes)
+  3. Migration complete!
+
+TOTAL TIME: 20-30 minutes
+
+STATUS: Ready to start immediately
+
+Questions? Check SAFE_DATA_MIGRATION_STRATEGY.md (complete reference)
+
+================================================================================

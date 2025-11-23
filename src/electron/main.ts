@@ -4,9 +4,14 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import os from 'os';
 import Store from 'electron-store';
+import Database from 'better-sqlite3';
+import { createClient } from '@supabase/supabase-js';
 import { registerFileOperationHandlers } from './ipc-handlers/fileOperations';
 import { registerPythonExecutionHandlers } from './ipc-handlers/pythonExecution';
 import { registerLlmHandlers } from './ipc-handlers/llmClient';
+import { registerMemoryHandlers, setMemoryServices } from './ipc-handlers/memoryHandlers';
+import { MemoryDaemon } from './memory/MemoryDaemon';
+import { RecallEngine } from './memory/RecallEngine';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,6 +25,8 @@ const store = new Store<{
 }>();
 
 let mainWindow: BrowserWindow | null = null;
+let memoryDaemon: MemoryDaemon | null = null;
+let localDb: Database.Database | null = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -135,18 +142,57 @@ app.whenReady().then(() => {
     return { success: true };
   });
 
+  // Initialize memory system
+  const memoryDbPath = path.join(app.getPath('userData'), 'memory.db');
+  localDb = new Database(memoryDbPath);
+
+  const supabase = createClient(
+    process.env.SUPABASE_URL!,
+    process.env.SUPABASE_ANON_KEY!
+  );
+
+  const recallEngine = new RecallEngine(localDb, supabase);
+  memoryDaemon = new MemoryDaemon(localDb, supabase, {
+    intervalMs: 30000, // 30 seconds
+    minImportance: 0.3,
+  });
+
   // Register all IPC handlers
   registerFileOperationHandlers();
   registerPythonExecutionHandlers();
   registerLlmHandlers();
 
-  createWindow();
+  // Connect memory services to handlers BEFORE registering handlers
+  setMemoryServices(memoryDaemon, recallEngine);
+
+  // THEN register memory handlers so they have access to services
+  registerMemoryHandlers();
+
+  // Start memory daemon and wait for it before creating window
+  memoryDaemon.start().then(() => {
+    console.log('[Main] Memory daemon started successfully');
+    createWindow();
+  }).catch(err => {
+    console.error('[Main] Failed to start memory daemon:', err);
+    // Fall back to creating window even if daemon fails
+    createWindow();
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
     }
   });
+});
+
+app.on('before-quit', async () => {
+  // Stop memory daemon gracefully
+  if (memoryDaemon) {
+    await memoryDaemon.stop();
+  }
+  if (localDb) {
+    localDb.close();
+  }
 });
 
 app.on('window-all-closed', () => {

@@ -145,7 +145,60 @@ export const ChatArea = () => {
         };
         setMessages(prev => [...prev, userMessage]);
 
-        // Build messages array for LLM (Chief Quant system prompt + history + new message)
+        // ============ AUTOMATIC MEMORY RECALL ============
+        // Build context query from recent messages + new message
+        const recentContext = messages
+          .slice(-2)
+          .map(m => m.content)
+          .join(' ');
+        const memoryQuery = `${recentContext} ${messageContent}`.slice(0, 500);
+
+        // Query memory in parallel with prompt building - with error boundaries
+        let memoryRecallResult: any = { memories: [], totalFound: 0, searchTimeMs: 0, usedCache: false, query: memoryQuery };
+        const basePrompt = buildChiefQuantPrompt();
+
+        if (selectedWorkspaceId) {
+          try {
+            const result = await window.electron.memoryRecall(memoryQuery, selectedWorkspaceId, {
+              limit: 10,
+              minImportance: 0.4,
+              useCache: true,
+              rerank: true,
+            });
+
+            // Validate result structure
+            if (result && typeof result === 'object') {
+              memoryRecallResult = result;
+            } else {
+              console.warn('[ChatArea] Invalid memory recall result structure');
+            }
+          } catch (memoryError) {
+            console.error('[ChatArea] Memory recall failed, continuing without memories:', memoryError);
+            toast({
+              title: 'Memory Recall Warning',
+              description: 'Could not retrieve context memories, continuing without them',
+              variant: 'default',
+            });
+          }
+        }
+
+        // Format recalled memories for injection
+        let memoryContext = '';
+        if (memoryRecallResult?.memories && Array.isArray(memoryRecallResult.memories) && memoryRecallResult.memories.length > 0) {
+          try {
+            memoryContext = await window.electron.memoryFormatForPrompt(memoryRecallResult.memories);
+          } catch (formatError) {
+            console.error('[ChatArea] Memory formatting failed:', formatError);
+            memoryContext = '';
+          }
+        }
+
+        // Build enriched system prompt with memories
+        const enrichedSystemPrompt = memoryContext
+          ? `${basePrompt}\n\n${memoryContext}\n\n---\n\nThe above memories were automatically recalled based on the conversation context. Use them to inform your response.`
+          : basePrompt;
+
+        // ============ BUILD LLM MESSAGES ============
         // Truncate history to stay within context limits (~100k tokens ≈ 400k chars)
         const MAX_HISTORY_CHARS = 400000;
         let historyMessages = messages.map(m => ({ role: m.role, content: m.content }));
@@ -158,7 +211,7 @@ export const ChatArea = () => {
         }
 
         const llmMessages = [
-          { role: 'system', content: buildChiefQuantPrompt() },
+          { role: 'system', content: enrichedSystemPrompt },
           ...historyMessages,
           { role: 'user', content: messageContent }
         ];

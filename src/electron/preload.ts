@@ -36,6 +36,16 @@ contextBridge.exposeInMainWorld('electron', {
   // API Keys
   getAPIKeys: () => ipcRenderer.invoke('get-api-keys'),
   setAPIKeys: (keys: { gemini: string; openai: string; deepseek: string }) => ipcRenderer.invoke('set-api-keys', keys),
+
+  // Memory System
+  memoryRecall: (query: string, workspaceId: string, options?: any) =>
+    ipcRenderer.invoke('memory:recall', query, workspaceId, options),
+  memoryFormatForPrompt: (memories: any[]) =>
+    ipcRenderer.invoke('memory:formatForPrompt', memories),
+  memoryWarmCache: (workspaceId: string) =>
+    ipcRenderer.invoke('memory:warmCache', workspaceId),
+  memoryDaemonStatus: () =>
+    ipcRenderer.invoke('memory:daemon:status'),
 });
 
 // The ElectronAPI type is defined in src/types/electron.d.ts as a global type

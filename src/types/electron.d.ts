@@ -44,6 +44,43 @@ interface ElectronAPI {
   // API Keys
   getAPIKeys: () => Promise<{ gemini: string; openai: string; deepseek: string }>;
   setAPIKeys: (keys: { gemini: string; openai: string; deepseek: string }) => Promise<{ success: boolean }>;
+
+  // Memory System
+  memoryRecall: (
+    query: string,
+    workspaceId: string,
+    options?: {
+      limit?: number;
+      minImportance?: number;
+      useCache?: boolean;
+      rerank?: boolean;
+      categories?: string[];
+      symbols?: string[];
+    }
+  ) => Promise<{
+    memories: Array<{
+      id: string;
+      content: string;
+      summary: string;
+      type: string;
+      category: string | null;
+      symbols: string[] | null;
+      importance: number;
+      relevanceScore: number;
+      source: string;
+      createdAt: string;
+    }>;
+    totalFound: number;
+    searchTimeMs: number;
+    usedCache: boolean;
+    query: string;
+    expandedQueries?: string[];
+    error?: string;
+  }>;
+
+  memoryFormatForPrompt: (memories: any[]) => Promise<string>;
+  memoryWarmCache: (workspaceId: string) => Promise<{ success: boolean; error?: string }>;
+  memoryDaemonStatus: () => Promise<{ daemonRunning: boolean; cacheSize: number; totalMemories: number; error?: string }>;
 }
 
 declare global {
