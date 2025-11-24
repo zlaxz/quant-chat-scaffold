@@ -504,17 +504,31 @@ export class RecallEngine {
     }
 
     // Update Supabase asynchronously (don't await)
-    this.supabase
-      .from('memories')
-      .update({
-        access_count: this.supabase.sql`access_count + 1`,
-        last_accessed: new Date().toISOString(),
-      })
-      .in('id', memoryIds)
-      .then(() => {})
-      .catch((err) =>
-        console.error('[RecallEngine] Failed to update access metrics:', err)
-      );
+    // Note: We can't increment in a single query, so we do it per memory
+    memoryIds.forEach(async (id) => {
+      try {
+        const { data: current } = await this.supabase
+          .from('memory_notes')
+          .select('metadata')
+          .eq('id', id)
+          .single();
+        
+        if (current) {
+          const metadata = current.metadata as any || {};
+          const accessCount = (metadata.access_count || 0) + 1;
+          
+          await this.supabase
+            .from('memory_notes')
+            .update({
+              metadata: { ...metadata, access_count: accessCount },
+              updated_at: new Date().toISOString(),
+            })
+            .eq('id', id);
+        }
+      } catch (err) {
+        console.error('[RecallEngine] Failed to update access metrics:', err);
+      }
+    });
   }
 
   /**
