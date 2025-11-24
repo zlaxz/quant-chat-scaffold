@@ -1,37 +1,39 @@
 /**
  * LLM Tier Routing Configuration
- * 
+ *
  * Defines model selection for different reasoning tiers:
  * - PRIMARY: High-stakes reasoning (code writing, architecture, complex strategy analysis)
  * - SWARM: Agent/specialist workflows (audit, pattern mining, curation, risk review)
+ *
+ * IMPORTANT: Model names are now centralized in ./models.ts
+ * This file re-exports from the centralized config for backwards compatibility.
  */
 
+import { MODELS, type ProviderName as ModelProviderName } from './models';
+
 export type LlmTier = 'primary' | 'secondary' | 'swarm';
-export type ProviderName = 'openai' | 'google' | 'anthropic' | 'deepseek' | 'custom';
+export type ProviderName = ModelProviderName;
 
 /**
  * Model configuration for PRIMARY tier
  * Used for: Main chat, final synthesizers, high-stakes reasoning
- * Provider: Google Gemini 3 (thinking mode)
  */
-export const PRIMARY_MODEL = import.meta.env.VITE_PRIMARY_MODEL || 'gemini-3-pro-preview';
-export const PRIMARY_PROVIDER = (import.meta.env.VITE_PRIMARY_PROVIDER || 'google') as ProviderName;
+export const PRIMARY_MODEL = MODELS.PRIMARY.model;
+export const PRIMARY_PROVIDER = MODELS.PRIMARY.provider;
 
 /**
  * Model configuration for SECONDARY tier
  * Used for: Alternative high-quality reasoning when PRIMARY is unavailable
- * Provider: OpenAI GPT-5.1
  */
-export const SECONDARY_MODEL = import.meta.env.VITE_SECONDARY_MODEL || 'gpt-4o';
-export const SECONDARY_PROVIDER = (import.meta.env.VITE_SECONDARY_PROVIDER || 'openai') as ProviderName;
+export const SECONDARY_MODEL = MODELS.SECONDARY.model;
+export const SECONDARY_PROVIDER = MODELS.SECONDARY.provider;
 
 /**
  * Model configuration for SWARM tier
  * Used for: Agent modes, specialist analysis, repetitive workflows
- * Provider: DeepSeek-Reasoner
  */
-export const SWARM_MODEL = import.meta.env.VITE_SWARM_MODEL || 'deepseek-reasoner';
-export const SWARM_PROVIDER = (import.meta.env.VITE_SWARM_PROVIDER || 'deepseek') as ProviderName;
+export const SWARM_MODEL = MODELS.SWARM.model;
+export const SWARM_PROVIDER = MODELS.SWARM.provider;
 
 /**
  * Get model name for a specific tier

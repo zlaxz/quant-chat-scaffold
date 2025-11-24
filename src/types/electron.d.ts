@@ -81,6 +81,48 @@ interface ElectronAPI {
   memoryFormatForPrompt: (memories: any[]) => Promise<string>;
   memoryWarmCache: (workspaceId: string) => Promise<{ success: boolean; error?: string }>;
   memoryDaemonStatus: () => Promise<{ daemonRunning: boolean; cacheSize: number; totalMemories: number; error?: string }>;
+  checkMemoryTriggers: (message: string, workspaceId: string) => Promise<Array<{
+    id: string;
+    content: string;
+    summary: string;
+    triggeredBy?: string[];
+    importance: number;
+  }>>;
+  getStaleMemories: (workspaceId: string) => Promise<Array<{
+    id: string;
+    content: string;
+    summary: string;
+    protection_level: number;
+    financial_impact: number | null;
+    last_recalled_at: string | null;
+    days_since_recall: number;
+  }>>;
+  markMemoriesRecalled: (memoryIds: string[]) => Promise<{ success: boolean; error?: string }>;
+
+  // Tool progress events (for real-time tool execution visibility)
+  onToolProgress: (callback: (data: {
+    type: 'thinking' | 'tools-starting' | 'executing' | 'completed';
+    tool?: string;
+    args?: Record<string, any>;
+    success?: boolean;
+    preview?: string;
+    count?: number;
+    iteration?: number;
+    message?: string;
+    timestamp: number;
+  }) => void) => () => void;
+
+  // LLM streaming events (for real-time text streaming)
+  onLLMStream: (callback: (data: {
+    type: 'chunk' | 'done' | 'error';
+    content?: string;
+    error?: string;
+    timestamp: number;
+  }) => void) => () => void;
+
+  // Remove listeners (cleanup)
+  removeToolProgressListener: () => void;
+  removeLLMStreamListener: () => void;
 }
 
 declare global {

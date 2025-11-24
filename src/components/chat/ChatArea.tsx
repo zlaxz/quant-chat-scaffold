@@ -10,8 +10,15 @@ import { useChatContext } from '@/contexts/ChatContext';
 import { cn } from '@/lib/utils';
 import { executeCommand, parseCommand, getCommandSuggestions, commands, setWriteConfirmationCallback } from '@/lib/slashCommands';
 import { useWriteConfirmation } from '@/hooks/useWriteConfirmation';
+import { useMemoryReinforcement } from '@/hooks/useMemoryReinforcement';
 import { chatPrimary } from '@/lib/electronClient';
 import { buildChiefQuantPrompt } from '@/prompts/chiefQuantPrompt';
+import { detectIntent, type DetectedIntent } from '@/lib/intentDetector';
+import { ActiveExperimentBar } from './ActiveExperimentBar';
+import { getSuggestions, type AppState } from '@/lib/contextualSuggestions';
+import { CommandSuggestions } from './CommandSuggestions';
+import { RunResultCard } from './RunResultCard';
+import { isBacktestResult } from '@/types/chat';
 
 interface Message {
   id: string;
@@ -21,25 +28,94 @@ interface Message {
 }
 
 export const ChatArea = () => {
-  const { selectedSessionId, selectedWorkspaceId } = useChatContext();
+  const { selectedSessionId, selectedWorkspaceId, activeExperiment, setActiveExperiment } = useChatContext();
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingMessages, setIsFetchingMessages] = useState(false);
   const [commandSuggestions, setCommandSuggestions] = useState<string[]>([]);
   const [showCommandMenu, setShowCommandMenu] = useState(false);
+  const [intentSuggestion, setIntentSuggestion] = useState<DetectedIntent | null>(null);
+  const [appState, setAppState] = useState<AppState>({});
+  const [showContextualSuggestions, setShowContextualSuggestions] = useState(true);
+  const [toolProgress, setToolProgress] = useState<Array<{
+    type: string;
+    tool?: string;
+    args?: Record<string, any>;
+    success?: boolean;
+    preview?: string;
+    iteration?: number;
+    count?: number;
+    message?: string;
+    timestamp: number;
+  }>>([]);
+  const [streamingContent, setStreamingContent] = useState('');
+  const [isStreaming, setIsStreaming] = useState(false);
   const { toast } = useToast();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // Function to save messages with retry logic
+  const saveMessagesToDb = async (messages: any[]): Promise<boolean> => {
+    const maxRetries = 3;
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const { error } = await supabase.from('messages').insert(messages);
+      if (!error) {
+        return true;
+      }
+
+      lastError = error;
+      if (attempt < maxRetries) {
+        // Exponential backoff: 1s, 2s, 3s
+        await new Promise(r => setTimeout(r, 1000 * attempt));
+      }
+    }
+
+    console.error('Failed to save messages after retries:', lastError);
+    toast({
+      title: 'Save Failed',
+      description: 'Messages may not persist. Check your connection.',
+      variant: 'destructive',
+    });
+    return false;
+  };
   
   // Write confirmation hook
   const { showConfirmation, ConfirmationDialog } = useWriteConfirmation();
-  
+
+  // Memory reinforcement hook - monitors for stale critical memories
+  const { staleMemories } = useMemoryReinforcement();
+
   // Set global confirmation callback for slash commands
   useEffect(() => {
     setWriteConfirmationCallback(showConfirmation);
     return () => setWriteConfirmationCallback(undefined);
   }, [showConfirmation]);
+
+  // Subscribe to IPC events for tool progress and streaming
+  useEffect(() => {
+    // Subscribe to tool progress
+    const unsubscribeTool = window.electron.onToolProgress((data) => {
+      setToolProgress(prev => [...prev, data]);
+    });
+
+    // Subscribe to LLM streaming
+    const unsubscribeStream = window.electron.onLLMStream((data) => {
+      if (data.type === 'chunk' && data.content) {
+        setStreamingContent(prev => prev + data.content);
+        setIsStreaming(true);
+      } else if (data.type === 'done') {
+        setIsStreaming(false);
+      }
+    });
+
+    return () => {
+      unsubscribeTool();
+      unsubscribeStream();
+    };
+  }, []);
 
   // Load messages when session changes
   useEffect(() => {
@@ -50,18 +126,26 @@ export const ChatArea = () => {
     }
   }, [selectedSessionId]);
 
-  // Auto-scroll to bottom when messages change
+  // Auto-scroll to bottom when messages, tool progress, or streaming content change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, toolProgress, streamingContent]);
 
-  // Update command suggestions when input changes
+  // Update command suggestions and intent detection when input changes
   useEffect(() => {
     if (inputValue.startsWith('/')) {
       const suggestions = getCommandSuggestions(inputValue);
       setCommandSuggestions(suggestions);
+      setIntentSuggestion(null); // Clear intent when typing slash command
     } else {
       setCommandSuggestions([]);
+      // Detect intent for natural language input
+      const intent = detectIntent(inputValue);
+      if (intent && intent.confidence >= 0.7) {
+        setIntentSuggestion(intent);
+      } else {
+        setIntentSuggestion(null);
+      }
     }
   }, [inputValue]);
 
@@ -78,6 +162,15 @@ export const ChatArea = () => {
 
       if (error) throw error;
       setMessages(data || []);
+
+      // Count backtest commands in message history to initialize runCount
+      if (data && selectedWorkspaceId) {
+        const backtestCount = data.filter(
+          (msg) => msg.role === 'system' && msg.content.includes('Command: /backtest')
+        ).length;
+
+        setAppState(prev => ({ ...prev, runCount: backtestCount }));
+      }
     } catch (error: any) {
       console.error('Error loading messages:', error);
       toast({
@@ -96,6 +189,11 @@ export const ChatArea = () => {
     const messageContent = inputValue.trim();
     setInputValue('');
     setCommandSuggestions([]);
+
+    // Clear progress state for new message
+    setToolProgress([]);
+    setStreamingContent('');
+
     setIsLoading(true);
 
     try {
@@ -107,6 +205,7 @@ export const ChatArea = () => {
         const result = await executeCommand(messageContent, {
           sessionId: selectedSessionId,
           workspaceId: selectedWorkspaceId,
+          setActiveExperiment,
         });
 
         // Add command and result as system messages
@@ -125,6 +224,32 @@ export const ChatArea = () => {
         };
 
         setMessages(prev => [...prev, commandMessage, resultMessage]);
+
+        // Update app state based on command type for contextual suggestions
+        if (result.success && parsed) {
+          const commandName = parsed.command;
+
+          if (commandName === 'backtest') {
+            // Extract run ID from result if available
+            const runIdMatch = result.data?.runId || result.message.match(/run ID: (\S+)/i)?.[1];
+            setAppState(prev => ({
+              ...prev,
+              lastAction: 'backtest',
+              lastRunId: runIdMatch,
+              runCount: (prev.runCount || 0) + 1
+            }));
+            setShowContextualSuggestions(true);
+          } else if (commandName === 'audit_run') {
+            setAppState(prev => ({ ...prev, lastAction: 'audit' }));
+            setShowContextualSuggestions(true);
+          } else if (commandName === 'compare') {
+            setAppState(prev => ({ ...prev, lastAction: 'compare' }));
+            setShowContextualSuggestions(true);
+          } else if (commandName === 'note') {
+            setAppState(prev => ({ ...prev, lastAction: 'insight' }));
+            setShowContextualSuggestions(true);
+          }
+        }
 
         if (!result.success) {
           toast({
@@ -153,26 +278,40 @@ export const ChatArea = () => {
           .join(' ');
         const memoryQuery = `${recentContext} ${messageContent}`.slice(0, 500);
 
-        // Query memory in parallel with prompt building - with error boundaries
-        let memoryRecallResult: any = { memories: [], totalFound: 0, searchTimeMs: 0, usedCache: false, query: memoryQuery };
+        // Collect all memories from multiple sources
+        let triggeredMemories: any[] = [];
+        let semanticMemories: any[] = [];
+        const allMemoryIds: string[] = [];
         const basePrompt = buildChiefQuantPrompt();
 
         if (selectedWorkspaceId) {
           try {
-            // Semantic recall
+            // 1. TRIGGER-BASED RECALL (Highest Priority - Critical Lessons)
+            const triggerResult = await window.electron.checkMemoryTriggers(
+              messageContent,
+              selectedWorkspaceId
+            );
+            if (triggerResult && Array.isArray(triggerResult) && triggerResult.length > 0) {
+              triggeredMemories = triggerResult;
+              console.log(`[ChatArea] Triggered ${triggeredMemories.length} critical memories`);
+            }
+
+            // 2. SEMANTIC RECALL (Reduced limit to make room for triggered)
+            const semanticLimit = Math.max(5, 10 - triggeredMemories.length);
             const recallResult = await window.electron.memoryRecall(memoryQuery, selectedWorkspaceId, {
-              limit: 10,
+              limit: semanticLimit,
               minImportance: 0.4,
               useCache: true,
               rerank: true,
             });
 
-            // Validate recall result structure
-            if (recallResult && typeof recallResult === 'object') {
-              memoryRecallResult = recallResult;
-            } else {
-              console.warn('[ChatArea] Invalid memory recall result structure');
+            if (recallResult?.memories && Array.isArray(recallResult.memories)) {
+              semanticMemories = recallResult.memories;
             }
+
+            // 3. STALE MEMORY INJECTION (Force-injected from hook)
+            // staleMemories are already available from useMemoryReinforcement hook
+
           } catch (memoryError) {
             console.error('[ChatArea] Memory recall failed, continuing without memories:', memoryError);
             toast({
@@ -183,11 +322,29 @@ export const ChatArea = () => {
           }
         }
 
+        // Combine memories: triggered (highest priority) -> stale -> semantic
+        const allMemories = [
+          ...triggeredMemories,
+          ...staleMemories,
+          ...semanticMemories
+        ];
+
+        // Track memory IDs for marking as recalled
+        allMemories.forEach(m => {
+          if (m?.id) allMemoryIds.push(m.id);
+        });
+
         // Format recalled memories for injection
         let memoryContext = '';
-        if (memoryRecallResult?.memories && Array.isArray(memoryRecallResult.memories) && memoryRecallResult.memories.length > 0) {
+        if (allMemories.length > 0) {
           try {
-            memoryContext = await window.electron.memoryFormatForPrompt(memoryRecallResult.memories);
+            memoryContext = await window.electron.memoryFormatForPrompt(allMemories);
+
+            // Mark memories as recalled (updates last_recalled_at)
+            if (allMemoryIds.length > 0) {
+              await window.electron.markMemoriesRecalled(allMemoryIds);
+              console.log(`[ChatArea] Marked ${allMemoryIds.length} memories as recalled`);
+            }
           } catch (formatError) {
             console.error('[ChatArea] Memory formatting failed:', formatError);
             memoryContext = '';
@@ -196,7 +353,7 @@ export const ChatArea = () => {
 
         // Build enriched system prompt with memories
         const enrichedSystemPrompt = memoryContext
-          ? `${basePrompt}\n\n${memoryContext}\n\n---\n\nThe above memories were automatically recalled based on the conversation context. Use them to inform your response.`
+          ? `${basePrompt}\n\n${memoryContext}\n\n---\n\nThe above memories were automatically recalled based on the conversation context (${triggeredMemories.length} triggered, ${staleMemories.length} stale, ${semanticMemories.length} semantic). Use them to inform your response.`
           : basePrompt;
 
         // ============ BUILD LLM MESSAGES ============
@@ -229,20 +386,11 @@ export const ChatArea = () => {
         };
         setMessages(prev => [...prev, assistantMessage]);
 
-        // Save both messages to database (background, non-blocking but notify on failure)
-        supabase.from('messages').insert([
+        // Save both messages to database with retry logic
+        await saveMessagesToDb([
           { session_id: selectedSessionId, role: 'user', content: messageContent },
           { session_id: selectedSessionId, role: 'assistant', content: response.content, provider: response.provider, model: response.model }
-        ]).then(({ error }) => {
-          if (error) {
-            console.error('Error saving messages to DB:', error);
-            toast({
-              title: 'Save Warning',
-              description: 'Messages displayed but failed to save to database. They may not persist.',
-              variant: 'destructive',
-            });
-          }
-        });
+        ]);
       }
     } catch (error: any) {
       console.error('Error sending message:', error);
@@ -263,6 +411,26 @@ export const ChatArea = () => {
     }
   };
 
+  // Active Experiment handlers
+  const handleViewResults = () => {
+    if (activeExperiment?.lastRunId) {
+      // Scroll to or highlight results in the chat
+      // For now, we'll just show a toast
+      toast({
+        title: 'View Results',
+        description: `Viewing results for run #${activeExperiment.lastRunId.slice(-6)}`,
+      });
+    }
+  };
+
+  const handleIterate = () => {
+    setInputValue('/iterate ');
+  };
+
+  const handleNewRun = () => {
+    setInputValue('/backtest ');
+  };
+
   if (!selectedSessionId) {
     return (
       <div className="flex-1 flex items-center justify-center bg-muted/20">
@@ -277,6 +445,15 @@ export const ChatArea = () => {
 
   return (
     <div className="flex-1 flex flex-col h-full">
+      {/* Active Experiment Bar */}
+      <ActiveExperimentBar
+        experiment={activeExperiment}
+        onClear={() => setActiveExperiment(null)}
+        onViewResults={handleViewResults}
+        onIterate={handleIterate}
+        onNewRun={handleNewRun}
+      />
+
       {/* Messages Area */}
       <ScrollArea className="flex-1 p-4" ref={scrollAreaRef}>
         {messages.length === 0 ? (
@@ -289,47 +466,105 @@ export const ChatArea = () => {
           </div>
         ) : (
           <div className="space-y-4">
-            {messages.map((message) => (
-              <div
-                key={message.id}
-                className="w-full"
-              >
+            {messages.map((message) => {
+              // Check for special message types
+              const backtestResult = isBacktestResult(message.content);
+
+              if (backtestResult) {
+                return (
+                  <RunResultCard
+                    key={message.id}
+                    runId={backtestResult.runId}
+                    strategyName={backtestResult.strategyName}
+                    dateRange={backtestResult.dateRange}
+                    metrics={backtestResult.metrics}
+                    regime={backtestResult.regime}
+                    profile={backtestResult.profile}
+                    status={backtestResult.status}
+                    onAudit={() => {
+                      setInputValue(`/audit_run ${backtestResult.runId}`);
+                    }}
+                    onCompare={() => {
+                      toast({
+                        title: 'Compare Feature',
+                        description: 'Comparison feature coming soon',
+                      });
+                    }}
+                    onIterate={() => {
+                      setInputValue('/iterate ');
+                    }}
+                  />
+                );
+              }
+
+              // Regular message rendering
+              return (
                 <div
-                  className={cn(
-                    'w-full rounded-lg px-4 py-2 whitespace-pre-wrap',
-                    message.role === 'user'
-                      ? 'bg-primary text-primary-foreground'
-                      : message.role === 'assistant'
-                      ? 'bg-muted'
-                      : 'bg-accent/50 text-accent-foreground border border-accent'
-                  )}
+                  key={message.id}
+                  className="w-full"
                 >
-                  {message.role === 'system' && (
-                    <div className="flex items-center gap-2 mb-1 text-xs font-mono opacity-70">
-                      <Command className="h-3 w-3" />
-                      {message.content.startsWith('Command:') ? 'Slash Command' : 'System'}
+                  <div
+                    className={cn(
+                      'w-full rounded-lg px-4 py-2 whitespace-pre-wrap',
+                      message.role === 'user'
+                        ? 'bg-primary text-primary-foreground'
+                        : message.role === 'assistant'
+                        ? 'bg-muted'
+                        : 'bg-accent/50 text-accent-foreground border border-accent'
+                    )}
+                  >
+                    {message.role === 'system' && (
+                      <div className="flex items-center gap-2 mb-1 text-xs font-mono opacity-70">
+                        <Command className="h-3 w-3" />
+                        {message.content.startsWith('Command:') ? 'Slash Command' : 'System'}
+                      </div>
+                    )}
+                    <div className="text-sm">{message.content}</div>
+                    <div className="text-xs opacity-50 mt-1">
+                      {new Date(message.created_at).toLocaleTimeString()}
                     </div>
-                  )}
-                  <div className="text-sm">{message.content}</div>
-                  <div className="text-xs opacity-50 mt-1">
-                    {new Date(message.created_at).toLocaleTimeString()}
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
 
-            {/* Thinking/Tool indicator */}
+            {/* Thinking/Tool indicator with real-time progress */}
             {isLoading && (
               <div className="flex justify-start">
-                <div className="bg-muted rounded-lg px-4 py-3 max-w-[80%]">
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="font-mono">Thinking...</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground/70 mt-1">
-                    <Wrench className="h-3 w-3" />
-                    <span className="font-mono">Tools available: file, git, validation, analysis</span>
-                  </div>
+                <div className="bg-muted rounded-lg px-4 py-3 w-full max-w-[90%]">
+                  {/* Streaming content */}
+                  {streamingContent && (
+                    <div className="text-sm mb-3 whitespace-pre-wrap">{streamingContent}</div>
+                  )}
+
+                  {/* Tool progress */}
+                  {toolProgress.length > 0 ? (
+                    <div className="space-y-1">
+                      {toolProgress.map((progress, idx) => (
+                        <div key={idx} className="text-xs font-mono">
+                          {progress.type === 'thinking' && (
+                            <span className="text-muted-foreground">🧠 {progress.message || 'Processing...'}</span>
+                          )}
+                          {progress.type === 'tools-starting' && (
+                            <span className="text-blue-500">🔧 Starting {progress.count} tool(s) (iteration {progress.iteration})</span>
+                          )}
+                          {progress.type === 'executing' && (
+                            <span className="text-yellow-500">⚡ {progress.tool}({Object.entries(progress.args || {}).map(([k,v]) => `${k}="${String(v).slice(0,30)}"`).join(', ')})</span>
+                          )}
+                          {progress.type === 'completed' && (
+                            <span className={progress.success ? 'text-green-500' : 'text-red-500'}>
+                              {progress.success ? '✓' : '✗'} {progress.tool}: {progress.preview?.slice(0, 100)}...
+                            </span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      <span className="font-mono">Thinking...</span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -341,6 +576,53 @@ export const ChatArea = () => {
 
       {/* Input Area */}
       <div className="border-t border-border p-2">
+        {/* Contextual Suggestions */}
+        {showContextualSuggestions && (
+          <CommandSuggestions
+            suggestions={getSuggestions(appState)}
+            onSelect={(command) => {
+              setInputValue(command);
+              setShowContextualSuggestions(false);
+            }}
+            onDismiss={() => setShowContextualSuggestions(false)}
+          />
+        )}
+
+        {/* Intent Suggestion Bar */}
+        {intentSuggestion && !inputValue.startsWith('/') && (
+          <div className="mb-2 flex items-center gap-2 p-2 bg-blue-500/10 rounded border border-blue-500/20">
+            <span className="text-xs text-blue-400">💡</span>
+            <span className="text-xs flex-1">
+              <span className="text-muted-foreground">Did you mean:</span>{' '}
+              <code className="text-xs bg-muted px-2 py-0.5 rounded font-mono text-blue-300">
+                {intentSuggestion.suggestion}
+              </code>
+              {intentSuggestion.explanation && (
+                <span className="text-muted-foreground ml-2">({intentSuggestion.explanation})</span>
+              )}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-xs text-blue-400 hover:text-blue-300 hover:bg-blue-500/20"
+              onClick={() => {
+                setInputValue(intentSuggestion.suggestion);
+                setIntentSuggestion(null);
+              }}
+            >
+              Use this
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-6 px-2 text-xs hover:bg-muted/50"
+              onClick={() => setIntentSuggestion(null)}
+            >
+              Dismiss
+            </Button>
+          </div>
+        )}
+
         {/* Command Suggestions */}
         {commandSuggestions.length > 0 && (
           <div className="mb-2 flex flex-wrap gap-1">
@@ -355,7 +637,7 @@ export const ChatArea = () => {
             ))}
           </div>
         )}
-        
+
         <div className="flex gap-2">
           <Popover open={showCommandMenu} onOpenChange={setShowCommandMenu}>
             <PopoverTrigger asChild>

@@ -1,0 +1,17 @@
+{
+  "type": "backtest_result",
+  "runId": "abc123-def456-789ghi",
+  "strategyName": "SPY Momentum Strategy",
+  "dateRange": "2020-01-01 to 2023-12-31",
+  "metrics": {
+    "sharpe": 1.85,
+    "cagr": 0.18,
+    "maxDrawdown": -0.095,
+    "winRate": 0.62,
+    "totalTrades": 145,
+    "profitFactor": 1.8
+  },
+  "regime": "bull",
+  "profile": "conservative",
+  "status": "success"
+}

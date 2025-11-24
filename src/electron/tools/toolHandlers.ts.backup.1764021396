@@ -9,7 +9,6 @@ import { exec, execSync, spawn } from 'child_process';
 import { promisify } from 'util';
 import { glob } from 'glob';
 import OpenAI from 'openai';
-import * as FileOps from './fileOperations';
 
 const execAsync = promisify(exec);
 const fsPromises = fs.promises;
@@ -83,14 +82,68 @@ function safeResolvePath(relativePath: string): string {
 }
 
 // ==================== FILE OPERATIONS ====================
-// File operations delegated to shared FileSystemService
 
 export async function readFile(filePath: string): Promise<ToolResult> {
-  return FileOps.readFile(filePath);
+  try {
+    const fullPath = safeResolvePath(filePath);
+
+    if (!fs.existsSync(fullPath)) {
+      return { success: false, content: '', error: `File not found: ${filePath}` };
+    }
+
+    // Check file size before reading
+    const stats = fs.statSync(fullPath);
+    if (stats.size > MAX_FILE_SIZE) {
+      return {
+        success: false,
+        content: '',
+        error: `File too large (${(stats.size / 1024 / 1024).toFixed(1)}MB). Maximum is 10MB. Use search_code to find specific content.`
+      };
+    }
+
+    const content = fs.readFileSync(fullPath, 'utf-8');
+    return { success: true, content };
+  } catch (error) {
+    return {
+      success: false,
+      content: '',
+      error: `Error reading file: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
 }
 
 export async function listDirectory(dirPath: string): Promise<ToolResult> {
-  return FileOps.listDirectory(dirPath);
+  try {
+    const fullPath = safeResolvePath(dirPath || '.');
+
+    if (!fs.existsSync(fullPath)) {
+      return { success: false, content: '', error: `Directory not found: ${dirPath}` };
+    }
+
+    const MAX_ENTRIES = 200;
+    const entries = fs.readdirSync(fullPath, { withFileTypes: true });
+    const truncated = entries.length > MAX_ENTRIES;
+    const limitedEntries = entries.slice(0, MAX_ENTRIES);
+
+    const items = limitedEntries.map(entry => ({
+      name: entry.name,
+      type: entry.isDirectory() ? 'directory' : 'file'
+    }));
+
+    let resultContent = JSON.stringify(items, null, 2);
+    if (truncated) {
+      const warning = `⚠️ DIRECTORY TRUNCATED: Showing ${MAX_ENTRIES} of ${entries.length} entries.`;
+      resultContent = `${warning}\n\n${resultContent}`;
+    }
+
+    return { success: true, content: resultContent };
+  } catch (error) {
+    return {
+      success: false,
+      content: '',
+      error: `Error listing directory: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
 }
 
 export async function searchCode(
@@ -98,19 +151,168 @@ export async function searchCode(
   searchPath?: string,
   filePattern?: string
 ): Promise<ToolResult> {
-  return FileOps.searchCode(pattern, searchPath, filePattern);
+  try {
+    const root = getEngineRoot();
+    const targetPath = searchPath ? safeResolvePath(searchPath) : root;
+
+    // Build grep arguments array (prevents shell injection)
+    const grepArgs = ['-rn', pattern, targetPath];
+
+    if (filePattern) {
+      grepArgs.push(`--include=${filePattern}`);
+    }
+
+    // Exclude common directories
+    grepArgs.push(
+      '--exclude-dir=node_modules',
+      '--exclude-dir=.git',
+      '--exclude-dir=__pycache__',
+      '--exclude-dir=.venv'
+    );
+
+    // Use spawn with array arguments to prevent shell injection
+    const grep = spawn('grep', grepArgs, { cwd: root });
+
+    let stdout = '';
+    let stderr = '';
+
+    grep.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+
+    grep.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
+
+    const exitCode = await new Promise<number>((resolve, reject) => {
+      grep.on('close', (code) => resolve(code || 0));
+      grep.on('error', reject);
+    });
+
+    // grep returns 1 for no matches (not an error)
+    if (exitCode !== 0 && exitCode !== 1) {
+      return {
+        success: false,
+        content: '',
+        error: `Search error: ${stderr || `grep exited with code ${exitCode}`}`
+      };
+    }
+
+    if (exitCode === 1 || !stdout.trim()) {
+      return { success: true, content: 'No matches found' };
+    }
+
+    // Parse grep output into structured results
+    const MAX_RESULTS = 50;
+    const lines = stdout.trim().split('\n').filter(Boolean);
+    const truncated = lines.length > MAX_RESULTS;
+    const matches = lines.slice(0, MAX_RESULTS).map(line => {
+      const match = line.match(/^([^:]+):(\d+):(.*)$/);
+      if (match) {
+        return {
+          file: match[1].replace(root + '/', ''),
+          line: parseInt(match[2]),
+          context: match[3].trim()
+        };
+      }
+      return { file: '', line: 0, context: line };
+    });
+
+    let resultContent = `Found ${lines.length} matches:\n${JSON.stringify(matches, null, 2)}`;
+    if (truncated) {
+      resultContent = `⚠️ RESULTS TRUNCATED: Showing ${MAX_RESULTS} of ${lines.length} matches. Narrow your search pattern for complete results.\n\n${resultContent}`;
+    }
+
+    return {
+      success: true,
+      content: resultContent
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      content: '',
+      error: `Search error: ${error.message}`
+    };
+  }
 }
 
 export async function writeFile(filePath: string, content: string): Promise<ToolResult> {
-  return FileOps.writeFile(filePath, content);
+  try {
+    const fullPath = safeResolvePath(filePath);
+    const dir = path.dirname(fullPath);
+
+    // Create directory if it doesn't exist
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    // Create backup if file exists
+    let backupPath: string | undefined;
+    if (fs.existsSync(fullPath)) {
+      backupPath = `${fullPath}.backup.${Date.now()}`;
+      fs.copyFileSync(fullPath, backupPath);
+    }
+
+    fs.writeFileSync(fullPath, content, 'utf-8');
+
+    let message = `File written: ${filePath}`;
+    if (backupPath) {
+      message += `\nBackup created: ${path.basename(backupPath)}`;
+    }
+
+    return { success: true, content: message };
+  } catch (error) {
+    return {
+      success: false,
+      content: '',
+      error: `Error writing file: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
 }
 
 export async function appendFile(filePath: string, content: string): Promise<ToolResult> {
-  return FileOps.appendFile(filePath, content);
+  try {
+    const fullPath = safeResolvePath(filePath);
+
+    if (!fs.existsSync(fullPath)) {
+      return { success: false, content: '', error: `File not found: ${filePath}` };
+    }
+
+    fs.appendFileSync(fullPath, content, 'utf-8');
+    return { success: true, content: `Content appended to: ${filePath}` };
+  } catch (error) {
+    return {
+      success: false,
+      content: '',
+      error: `Error appending to file: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
 }
 
 export async function deleteFile(filePath: string): Promise<ToolResult> {
-  return FileOps.deleteFile(filePath);
+  try {
+    const fullPath = safeResolvePath(filePath);
+
+    if (!fs.existsSync(fullPath)) {
+      return { success: false, content: '', error: `File not found: ${filePath}` };
+    }
+
+    // Create backup before deleting
+    const backupPath = `${fullPath}.deleted.${Date.now()}`;
+    fs.copyFileSync(fullPath, backupPath);
+    fs.unlinkSync(fullPath);
+
+    return {
+      success: true,
+      content: `File deleted: ${filePath}\nBackup saved: ${path.basename(backupPath)}`
+    };
+  } catch (error) {
+    return {
+      success: false,
+      content: '',
+      error: `Error deleting file: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
 }
 
 // ==================== GIT OPERATIONS ====================

@@ -223,6 +223,65 @@ export const GIT_TOOLS: FunctionDeclaration[] = [
       },
       required: ['branch']
     }
+  },
+  {
+    name: 'git_push',
+    description: 'Push local commits to remote repository. Use after committing to share changes.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        remote: {
+          type: SchemaType.STRING,
+          description: 'Remote name (default: origin)'
+        },
+        branch: {
+          type: SchemaType.STRING,
+          description: 'Branch to push (default: current branch)'
+        },
+        force: {
+          type: SchemaType.BOOLEAN,
+          description: 'Force push (use with caution)'
+        }
+      }
+    }
+  },
+  {
+    name: 'git_pull',
+    description: 'Pull changes from remote repository. Updates local branch with remote changes.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        remote: {
+          type: SchemaType.STRING,
+          description: 'Remote name (default: origin)'
+        },
+        branch: {
+          type: SchemaType.STRING,
+          description: 'Branch to pull (default: current branch)'
+        },
+        rebase: {
+          type: SchemaType.BOOLEAN,
+          description: 'Use rebase instead of merge'
+        }
+      }
+    }
+  },
+  {
+    name: 'git_fetch',
+    description: 'Fetch changes from remote without merging. Use to see what changed upstream.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        remote: {
+          type: SchemaType.STRING,
+          description: 'Remote name (default: all remotes)'
+        },
+        prune: {
+          type: SchemaType.BOOLEAN,
+          description: 'Remove deleted remote branches'
+        }
+      }
+    }
   }
 ];
 
@@ -510,24 +569,24 @@ export const DATA_TOOLS: FunctionDeclaration[] = [
   },
   {
     name: 'data_quality_check',
-    description: 'Validate data integrity - check for missing bars, outliers, and price consistency issues',
+    description: 'Validate data integrity - check for missing bars, outliers, and price consistency issues. Comprehensive checks include: gap detection, OHLC validity, price outliers, zero/negative values, duplicates, NaN values, and volume analysis.',
     parameters: {
       type: SchemaType.OBJECT,
       properties: {
         symbol: {
           type: SchemaType.STRING,
-          description: 'Symbol to check'
+          description: 'Symbol to check (e.g., "SPX", "AAPL")'
         },
         start_date: {
           type: SchemaType.STRING,
-          description: 'Start date in YYYY-MM-DD format'
+          description: 'Optional start date in YYYY-MM-DD format (default: all available data)'
         },
         end_date: {
           type: SchemaType.STRING,
-          description: 'End date in YYYY-MM-DD format'
+          description: 'Optional end date in YYYY-MM-DD format (default: all available data)'
         }
       },
-      required: ['symbol', 'start_date', 'end_date']
+      required: ['symbol']
     }
   },
   {
@@ -546,6 +605,53 @@ export const DATA_TOOLS: FunctionDeclaration[] = [
   }
 ];
 
+// Agent spawning tools
+export const AGENT_TOOLS: FunctionDeclaration[] = [
+  {
+    name: 'spawn_agent',
+    description: 'Spawn a sub-agent to handle a specific task in parallel. Use for code review, analysis, research, or any task that can be delegated. The agent will execute using DeepSeek and return results.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        task: {
+          type: SchemaType.STRING,
+          description: 'Clear description of what the agent should accomplish'
+        },
+        context: {
+          type: SchemaType.STRING,
+          description: 'Any relevant context, file contents, or background information the agent needs'
+        },
+        agent_type: {
+          type: SchemaType.STRING,
+          description: 'Type of agent to spawn: analyst (data analysis), reviewer (code review), researcher (information gathering), coder (implementation)'
+        }
+      },
+      required: ['task', 'agent_type']
+    }
+  }
+];
+
+// Maintenance tools
+export const MAINTENANCE_TOOLS: FunctionDeclaration[] = [
+  {
+    name: 'cleanup_backups',
+    description: 'Delete backup files older than specified days. Backups are created when files are modified or deleted.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        dryRun: {
+          type: SchemaType.BOOLEAN,
+          description: 'If true, only report what would be deleted without actually deleting'
+        },
+        olderThanDays: {
+          type: SchemaType.NUMBER,
+          description: 'Delete backups older than this many days (default: 7)'
+        }
+      }
+    }
+  }
+];
+
 // All tools combined
 export const ALL_TOOLS: FunctionDeclaration[] = [
   ...FILE_TOOLS,
@@ -553,7 +659,9 @@ export const ALL_TOOLS: FunctionDeclaration[] = [
   ...VALIDATION_TOOLS,
   ...ANALYSIS_TOOLS,
   ...BACKTEST_TOOLS,
-  ...DATA_TOOLS
+  ...DATA_TOOLS,
+  ...AGENT_TOOLS,
+  ...MAINTENANCE_TOOLS
 ];
 
 // Tool names by category for filtering
@@ -563,5 +671,7 @@ export const TOOL_CATEGORIES = {
   validation: VALIDATION_TOOLS.map(t => t.name),
   analysis: ANALYSIS_TOOLS.map(t => t.name),
   backtest: BACKTEST_TOOLS.map(t => t.name),
-  data: DATA_TOOLS.map(t => t.name)
+  data: DATA_TOOLS.map(t => t.name),
+  agent: AGENT_TOOLS.map(t => t.name),
+  maintenance: MAINTENANCE_TOOLS.map(t => t.name)
 };

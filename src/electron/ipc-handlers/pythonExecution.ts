@@ -2,6 +2,7 @@ import { ipcMain } from 'electron';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs/promises';
+import { validateIPC, BacktestParamsSchema } from '../validation/schemas';
 
 // Get rotation engine root dynamically at runtime
 function getRotationEngineRoot(): string {
@@ -13,14 +14,11 @@ function getRotationEngineRoot(): string {
 }
 
 export function registerPythonExecutionHandlers() {
-  ipcMain.handle('run-backtest', async (_event, params: {
-    strategyKey: string;
-    startDate: string;
-    endDate: string;
-    capital: number;
-    profileConfig?: Record<string, any>;
-  }) => {
+  ipcMain.handle('run-backtest', async (_event, paramsRaw: unknown) => {
     try {
+      // Validate at IPC boundary
+      const params = validateIPC(BacktestParamsSchema, paramsRaw, 'backtest parameters');
+
       const ROTATION_ENGINE_ROOT = getRotationEngineRoot();
       
       // Build Python command using cli_wrapper.py

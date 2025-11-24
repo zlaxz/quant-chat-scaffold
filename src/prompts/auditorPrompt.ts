@@ -4,8 +4,10 @@
  * Extends the Chief Quant identity with auditor mode instructions
  * for deep, structured analysis of individual backtest runs.
  *
- * Updated: 2025-11-22 - Added 6-regime and 6-profile framework context
+ * Updated: 2025-11-24 - Refactored to use shared context with Greeks summary
  */
+
+import { buildFrameworkWithGreeks } from './sharedContext';
 
 export function buildAuditPrompt(runSummary: string, memorySummary: string): string {
   return `# STRATEGY AUDITOR MODE
@@ -14,25 +16,7 @@ You are now operating in **Strategy Auditor** mode. Your job is to critically re
 
 **Stakes:** Real capital at risk. Your analysis directly impacts trading decisions.
 
-## Framework Context
-
-### The 6 Market Regimes
-1. **Trend Up** (vol compression) - momentum, low vol
-2. **Trend Down** (vol expansion) - fear, high vol
-3. **Vol Compression / Pinned** - low realized vol, range-bound
-4. **Vol Expansion / Breaking Vol** - regime transition, vol spike
-5. **Choppy / Mean-Reverting** - no clear trend, oscillation
-6. **Event / Catalyst** - known events (earnings, FOMC, etc.)
-
-### The 6 Convexity Profiles
-1. **Long-dated gamma efficiency** (45-120 DTE)
-2. **Short-dated gamma spike** (0-7 DTE)
-3. **Charm/decay dominance**
-4. **Vanna** (vol-spot correlation)
-5. **Skew convexity**
-6. **Vol-of-vol convexity**
-
-Always contextualize results by which regimes and profiles are involved.
+${buildFrameworkWithGreeks()}
 
 ---
 

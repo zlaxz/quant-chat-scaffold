@@ -1,7 +1,14 @@
 import { ipcMain } from 'electron';
-import fs from 'fs/promises';
 import path from 'path';
 import { glob } from 'glob';
+import {
+  validateIPC,
+  FilePathSchema,
+  FileContentSchema,
+  DirectoryPathSchema,
+  SearchQuerySchema,
+} from '../validation/schemas';
+import { getFileSystemService } from '../services/FileSystemService';
 
 // Get rotation engine root dynamically at runtime
 function getRotationEngineRoot(): string {
@@ -12,23 +19,18 @@ function getRotationEngineRoot(): string {
   return root;
 }
 
-// Validate path is within rotation-engine to prevent directory traversal
-function validatePath(filePath: string): string {
-  const ROTATION_ENGINE_ROOT = getRotationEngineRoot();
-  const resolved = path.resolve(ROTATION_ENGINE_ROOT, filePath);
-  if (!resolved.startsWith(ROTATION_ENGINE_ROOT)) {
-    throw new Error('Invalid path: outside rotation-engine directory');
-  }
-  return resolved;
-}
-
 export function registerFileOperationHandlers() {
   // Read file
-  ipcMain.handle('read-file', async (_event, filePath: string) => {
+  ipcMain.handle('read-file', async (_event, filePathRaw: unknown) => {
     try {
-      const fullPath = validatePath(filePath);
-      const content = await fs.readFile(fullPath, 'utf-8');
-      return { content };
+      // Validate at IPC boundary
+      const filePath = validateIPC(FilePathSchema, filePathRaw, 'file path');
+      const fsService = getFileSystemService(getRotationEngineRoot());
+      const result = await fsService.readFile(filePath);
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      return { content: result.content };
     } catch (error) {
       console.error('Error reading file:', error);
       throw error;
@@ -36,11 +38,16 @@ export function registerFileOperationHandlers() {
   });
 
   // Write file
-  ipcMain.handle('write-file', async (_event, filePath: string, content: string) => {
+  ipcMain.handle('write-file', async (_event, filePathRaw: unknown, contentRaw: unknown) => {
     try {
-      const fullPath = validatePath(filePath);
-      await fs.mkdir(path.dirname(fullPath), { recursive: true });
-      await fs.writeFile(fullPath, content, 'utf-8');
+      // Validate at IPC boundary
+      const filePath = validateIPC(FilePathSchema, filePathRaw, 'file path');
+      const content = validateIPC(FileContentSchema, contentRaw, 'file content');
+      const fsService = getFileSystemService(getRotationEngineRoot());
+      const result = await fsService.writeFile(filePath, content);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
       return { success: true };
     } catch (error) {
       console.error('Error writing file:', error);
@@ -49,10 +56,15 @@ export function registerFileOperationHandlers() {
   });
 
   // Delete file
-  ipcMain.handle('delete-file', async (_event, filePath: string) => {
+  ipcMain.handle('delete-file', async (_event, filePathRaw: unknown) => {
     try {
-      const fullPath = validatePath(filePath);
-      await fs.unlink(fullPath);
+      // Validate at IPC boundary
+      const filePath = validateIPC(FilePathSchema, filePathRaw, 'file path');
+      const fsService = getFileSystemService(getRotationEngineRoot());
+      const result = await fsService.deleteFile(filePath);
+      if (!result.success) {
+        throw new Error(result.error);
+      }
       return { success: true };
     } catch (error) {
       console.error('Error deleting file:', error);
@@ -61,68 +73,53 @@ export function registerFileOperationHandlers() {
   });
 
   // List directory
-  ipcMain.handle('list-dir', async (_event, dirPath: string) => {
+  ipcMain.handle('list-dir', async (_event, dirPathRaw: unknown) => {
     try {
-      const fullPath = validatePath(dirPath || '.');
-      const entries = await fs.readdir(fullPath, { withFileTypes: true });
-      return {
-        entries: entries.map(entry => ({
-          name: entry.name,
-          type: entry.isDirectory() ? 'directory' : 'file',
-        })),
-      };
+      // Validate at IPC boundary (optional string, default to '.')
+      const dirPath = validateIPC(DirectoryPathSchema, dirPathRaw, 'directory path');
+      const fsService = getFileSystemService(getRotationEngineRoot());
+      const result = await fsService.listDirectory(dirPath || '');
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      return { entries: result.entries };
     } catch (error: any) {
       console.error('Error listing directory:', error);
-      
+
       // Provide helpful error for missing config
       if (error.message?.includes('No project directory configured')) {
         throw new Error('No project directory configured. Go to Settings to set one.');
       }
-      
+
       throw error;
     }
   });
 
   // Search code - returns flat array matching edge function shape
-  ipcMain.handle('search-code', async (_event, query: string, dirPath?: string) => {
+  ipcMain.handle('search-code', async (_event, queryRaw: unknown, dirPathRaw?: unknown) => {
     try {
-      const ROTATION_ENGINE_ROOT = getRotationEngineRoot();
-      const searchRoot = dirPath ? validatePath(dirPath) : ROTATION_ENGINE_ROOT;
-      const pattern = '**/*.py';
-      const files = await glob(pattern, { cwd: searchRoot, absolute: true });
+      // Validate at IPC boundary
+      const query = validateIPC(SearchQuerySchema, queryRaw, 'search query');
+      const dirPath = dirPathRaw !== undefined
+        ? validateIPC(DirectoryPathSchema, dirPathRaw, 'directory path')
+        : undefined;
 
-      const results: Array<{ file: string; line: number; context: string }> = [];
-      const regex = new RegExp(query, 'gi');
-      const maxResults = 100;
+      const fsService = getFileSystemService(getRotationEngineRoot());
+      const result = await fsService.searchCode(query, dirPath, '*.py');
 
-      for (const file of files) {
-        if (results.length >= maxResults) break;
-
-        const content = await fs.readFile(file, 'utf-8');
-        const lines = content.split('\n');
-        const relativePath = path.relative(ROTATION_ENGINE_ROOT, file);
-
-        lines.forEach((line, idx) => {
-          if (results.length >= maxResults) return;
-          if (regex.test(line)) {
-            results.push({
-              file: relativePath,
-              line: idx + 1,
-              context: line.trim(),
-            });
-          }
-        });
+      if (result.error) {
+        throw new Error(result.error);
       }
 
-      return { results };
+      return { results: result.matches || [] };
     } catch (error: any) {
       console.error('Error searching code:', error);
-      
+
       // Provide helpful error for missing config
       if (error.message?.includes('No project directory configured')) {
         throw new Error('No project directory configured. Go to Settings to set one.');
       }
-      
+
       throw error;
     }
   });

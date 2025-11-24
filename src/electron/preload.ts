@@ -48,8 +48,41 @@ contextBridge.exposeInMainWorld('electron', {
     ipcRenderer.invoke('memory:daemon:status'),
   checkMemoryTriggers: (message: string, workspaceId: string) =>
     ipcRenderer.invoke('memory:check-triggers', message, workspaceId),
+  getStaleMemories: (workspaceId: string) =>
+    ipcRenderer.invoke('memory:get-stale', workspaceId),
   markMemoriesRecalled: (memoryIds: string[]) =>
     ipcRenderer.invoke('memory:mark-recalled', memoryIds),
+
+  // Tool progress events (for real-time tool execution visibility)
+  onToolProgress: (callback: (data: {
+    type: 'thinking' | 'tools-starting' | 'executing' | 'completed';
+    tool?: string;
+    args?: Record<string, any>;
+    success?: boolean;
+    preview?: string;
+    count?: number;
+    iteration?: number;
+    message?: string;
+    timestamp: number;
+  }) => void) => {
+    ipcRenderer.on('tool-progress', (_event, data) => callback(data));
+    return () => ipcRenderer.removeAllListeners('tool-progress');
+  },
+
+  // LLM streaming events (for real-time text streaming)
+  onLLMStream: (callback: (data: {
+    type: 'chunk' | 'done' | 'error';
+    content?: string;
+    error?: string;
+    timestamp: number;
+  }) => void) => {
+    ipcRenderer.on('llm-stream', (_event, data) => callback(data));
+    return () => ipcRenderer.removeAllListeners('llm-stream');
+  },
+
+  // Remove listeners (cleanup)
+  removeToolProgressListener: () => ipcRenderer.removeAllListeners('tool-progress'),
+  removeLLMStreamListener: () => ipcRenderer.removeAllListeners('llm-stream'),
 });
 
 // The ElectronAPI type is defined in src/types/electron.d.ts as a global type

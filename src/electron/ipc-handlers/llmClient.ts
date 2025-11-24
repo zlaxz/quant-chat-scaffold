@@ -3,12 +3,19 @@ import { GoogleGenerativeAI, FunctionCallingMode } from '@google/generative-ai';
 import OpenAI from 'openai';
 import { ALL_TOOLS } from '../tools/toolDefinitions';
 import { executeTool } from '../tools/toolHandlers';
+import {
+  validateIPC,
+  ChatMessagesSchema,
+  SwarmPromptsSchema,
+} from '../validation/schemas';
+import { MODELS } from '../../config/models';
 
-// LLM routing config
-const PRIMARY_MODEL = 'gemini-2.5-pro-preview-06-05';
-const PRIMARY_PROVIDER = 'gemini';
-const SWARM_MODEL = 'deepseek-reasoner';
-const SWARM_PROVIDER = 'deepseek';
+// LLM routing config - centralized
+const PRIMARY_MODEL = MODELS.PRIMARY.model;
+const PRIMARY_PROVIDER = MODELS.PRIMARY.provider;
+const SWARM_MODEL = MODELS.SWARM.model;
+const SWARM_PROVIDER = MODELS.SWARM.provider;
+const HELPER_MODEL = MODELS.HELPER.model;
 
 // Max tool call iterations to prevent infinite loops
 const MAX_TOOL_ITERATIONS = 10;
@@ -92,8 +99,11 @@ function toolsToOpenAIFormat(): OpenAI.Chat.Completions.ChatCompletionTool[] {
 
 export function registerLlmHandlers() {
   // Primary tier (Gemini) with tool calling - DIRECT API CALL
-  ipcMain.handle('chat-primary', async (_event, messages: Array<{ role: string; content: string }>) => {
+  ipcMain.handle('chat-primary', async (_event, messagesRaw: unknown) => {
     try {
+      // Validate messages at IPC boundary
+      const messages = validateIPC(ChatMessagesSchema, messagesRaw, 'chat messages');
+
       const geminiClient = getGeminiClient();
       if (!geminiClient) {
         throw new Error('GEMINI_API_KEY not configured. Go to Settings to add your API key.');
@@ -133,8 +143,34 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
       const lastMessage = nonSystemMessages[nonSystemMessages.length - 1];
       const chat = model.startChat({ history });
 
-      // Tool execution loop
-      let response = await withRetry(() => chat.sendMessage(lastMessage.content));
+      // Emit initial thinking event
+      _event.sender.send('tool-progress', {
+        type: 'thinking',
+        message: 'Processing your request...',
+        timestamp: Date.now()
+      });
+
+      // Tool execution loop - use streaming for initial response
+      let response;
+      try {
+        const streamResult = await chat.sendMessageStream(lastMessage.content);
+        for await (const chunk of streamResult.stream) {
+          const text = chunk.text();
+          if (text) {
+            _event.sender.send('llm-stream', {
+              type: 'chunk',
+              content: text,
+              timestamp: Date.now()
+            });
+          }
+        }
+        response = await streamResult.response;
+      } catch (error) {
+        // Fallback to non-streaming if streaming fails
+        console.warn('[LLM] Streaming failed, falling back to non-streaming:', error);
+        response = await withRetry(() => chat.sendMessage(lastMessage.content));
+      }
+
       let iterations = 0;
       let allToolOutputs: string[] = [];
       let toolCallLog: string[] = []; // Visible log for user
@@ -155,6 +191,14 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
 
         console.log(`[LLM] Executing ${functionCalls.length} tool calls (iteration ${iterations + 1})`);
 
+        // Emit event when entering tool loop
+        _event.sender.send('tool-progress', {
+          type: 'tools-starting',
+          count: functionCalls.length,
+          iteration: iterations + 1,
+          timestamp: Date.now()
+        });
+
         // Execute all tool calls
         const toolResults: Array<{
           functionResponse: {
@@ -170,6 +214,15 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
 
           console.log(`[Tool] Calling: ${toolName}`, toolArgs);
 
+          // Emit BEFORE executing tool
+          _event.sender.send('tool-progress', {
+            type: 'executing',
+            tool: toolName,
+            args: toolArgs,
+            iteration: iterations + 1,
+            timestamp: Date.now()
+          });
+
           // Add to visible log
           const argsStr = Object.entries(toolArgs).map(([k, v]) => `${k}="${v}"`).join(', ');
           toolCallLog.push(`🔧 ${toolName}(${argsStr})`);
@@ -177,6 +230,16 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
           try {
             const result = await executeTool(toolName, toolArgs);
             const output = result.success ? result.content : `Error: ${result.error}`;
+
+            // Emit AFTER executing tool
+            _event.sender.send('tool-progress', {
+              type: 'completed',
+              tool: toolName,
+              success: result.success,
+              preview: output.slice(0, 300),
+              iteration: iterations + 1,
+              timestamp: Date.now()
+            });
 
             toolResults.push({
               functionResponse: {
@@ -192,6 +255,17 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
             allToolOutputs.push(`[${toolName}]: ${output.slice(0, 500)}${output.length > 500 ? '...' : ''}`);
           } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
+
+            // Emit error completion event
+            _event.sender.send('tool-progress', {
+              type: 'completed',
+              tool: toolName,
+              success: false,
+              preview: `Error: ${errorMsg}`,
+              iteration: iterations + 1,
+              timestamp: Date.now()
+            });
+
             toolCallLog.push(`   → ✗ Error: ${errorMsg}`);
             toolResults.push({
               functionResponse: {
@@ -228,8 +302,11 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
   });
 
   // Swarm tier (DeepSeek) with tool calling
-  ipcMain.handle('chat-swarm', async (_event, messages: Array<{ role: string; content: string }>) => {
+  ipcMain.handle('chat-swarm', async (_event, messagesRaw: unknown) => {
     try {
+      // Validate messages at IPC boundary
+      const messages = validateIPC(ChatMessagesSchema, messagesRaw, 'chat messages');
+
       const deepseekClient = getDeepSeekClient();
       if (!deepseekClient) {
         throw new Error('DEEPSEEK_API_KEY not configured. Go to Settings to add your API key.');
@@ -240,6 +317,13 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
         role: m.role as 'user' | 'assistant' | 'system',
         content: m.content
       }));
+
+      // Emit initial thinking event
+      _event.sender.send('tool-progress', {
+        type: 'thinking',
+        message: 'Processing your request...',
+        timestamp: Date.now()
+      });
 
       let iterations = 0;
       let finalContent = '';
@@ -265,6 +349,14 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
 
         console.log(`[Swarm] Executing ${message.tool_calls.length} tool calls (iteration ${iterations + 1})`);
 
+        // Emit event when entering tool loop
+        _event.sender.send('tool-progress', {
+          type: 'tools-starting',
+          count: message.tool_calls.length,
+          iteration: iterations + 1,
+          timestamp: Date.now()
+        });
+
         // Add assistant message with tool calls
         currentMessages.push({
           role: 'assistant',
@@ -275,7 +367,7 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
         // Execute tools and add results
         for (const toolCall of message.tool_calls) {
           if (toolCall.type !== 'function') continue;
-          
+
           const toolName = toolCall.function.name;
           let toolArgs: Record<string, any> = {};
 
@@ -287,6 +379,15 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
 
           console.log(`[Tool] Calling: ${toolName}`, toolArgs);
 
+          // Emit BEFORE executing tool
+          _event.sender.send('tool-progress', {
+            type: 'executing',
+            tool: toolName,
+            args: toolArgs,
+            iteration: iterations + 1,
+            timestamp: Date.now()
+          });
+
           // Add to visible log
           const argsStr = Object.entries(toolArgs).map(([k, v]) => `${k}="${v}"`).join(', ');
           toolCallLog.push(`🔧 ${toolName}(${argsStr})`);
@@ -294,6 +395,16 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
           try {
             const result = await executeTool(toolName, toolArgs);
             const output = result.success ? result.content : `Error: ${result.error}`;
+
+            // Emit AFTER executing tool
+            _event.sender.send('tool-progress', {
+              type: 'completed',
+              tool: toolName,
+              success: result.success,
+              preview: output.slice(0, 300),
+              iteration: iterations + 1,
+              timestamp: Date.now()
+            });
 
             // Add result preview to log
             const preview = output.slice(0, 200).replace(/\n/g, ' ');
@@ -306,6 +417,17 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
             });
           } catch (error) {
             const errorMsg = error instanceof Error ? error.message : String(error);
+
+            // Emit error completion event
+            _event.sender.send('tool-progress', {
+              type: 'completed',
+              tool: toolName,
+              success: false,
+              preview: `Error: ${errorMsg}`,
+              iteration: iterations + 1,
+              timestamp: Date.now()
+            });
+
             toolCallLog.push(`   → ✗ Error: ${errorMsg}`);
             currentMessages.push({
               role: 'tool',
@@ -336,8 +458,11 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
   });
 
   // Swarm parallel (DeepSeek) - multiple agents without tools for speed
-  ipcMain.handle('chat-swarm-parallel', async (_event, prompts: Array<{ agentId: string; messages: Array<{ role: string; content: string }> }>) => {
+  ipcMain.handle('chat-swarm-parallel', async (_event, promptsRaw: unknown) => {
     try {
+      // Validate swarm prompts at IPC boundary
+      const prompts = validateIPC(SwarmPromptsSchema, promptsRaw, 'swarm prompts');
+
       const deepseekClient = getDeepSeekClient();
       if (!deepseekClient) {
         throw new Error('DEEPSEEK_API_KEY not configured. Go to Settings to add your API key.');
@@ -366,15 +491,18 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
   });
 
   // Helper chat (OpenAI mini) - no tools, fast responses
-  ipcMain.handle('helper-chat', async (_event, messages: Array<{ role: string; content: string }>) => {
+  ipcMain.handle('helper-chat', async (_event, messagesRaw: unknown) => {
     try {
+      // Validate messages at IPC boundary
+      const messages = validateIPC(ChatMessagesSchema, messagesRaw, 'chat messages');
+
       const openaiClient = getOpenAIClient();
       if (!openaiClient) {
         throw new Error('OPENAI_API_KEY not configured. Go to Settings to add your API key.');
       }
 
       const completion = await withRetry(() => openaiClient.chat.completions.create({
-        model: 'gpt-4o-mini',
+        model: HELPER_MODEL,
         messages: messages.map(m => ({
           role: m.role as 'user' | 'assistant' | 'system',
           content: m.content

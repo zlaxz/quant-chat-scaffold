@@ -10,6 +10,7 @@ import { registerFileOperationHandlers } from './ipc-handlers/fileOperations';
 import { registerPythonExecutionHandlers } from './ipc-handlers/pythonExecution';
 import { registerLlmHandlers } from './ipc-handlers/llmClient';
 import { registerMemoryHandlers, setMemoryServices, registerAnalysisHandlers } from './ipc-handlers/memoryHandlers';
+import { setFileSystemRoot } from './services/FileSystemService';
 import { MemoryDaemon } from './memory/MemoryDaemon';
 import { RecallEngine } from './memory/RecallEngine';
 import { OverfittingDetector } from './analysis/overfittingDetector';
@@ -66,6 +67,8 @@ app.whenReady().then(() => {
   const savedDirectory = store.get('projectDirectory');
   if (savedDirectory) {
     process.env.ROTATION_ENGINE_ROOT = savedDirectory;
+    // Initialize FileSystemService with root path
+    setFileSystemRoot(savedDirectory);
   }
 
   // Initialize API keys from store
@@ -90,7 +93,7 @@ app.whenReady().then(() => {
     if (!fs.existsSync(dirPath)) {
       throw new Error('Directory does not exist');
     }
-    
+
     // Validate it's a directory
     const stats = fs.statSync(dirPath);
     if (!stats.isDirectory()) {
@@ -99,6 +102,8 @@ app.whenReady().then(() => {
 
     store.set('projectDirectory', dirPath);
     process.env.ROTATION_ENGINE_ROOT = dirPath;
+    // Update FileSystemService root
+    setFileSystemRoot(dirPath);
     return { success: true };
   });
 

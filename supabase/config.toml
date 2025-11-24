@@ -12,7 +12,7 @@ project_id = "ynaqtawyynqikfyranda"
 # - DEEPSEEK_API_KEY: DeepSeek API (SWARM tier)
 #
 # Model and provider configuration (set via Supabase secrets):
-# - PRIMARY_MODEL, PRIMARY_PROVIDER (default: gemini-2.0-flash-thinking-exp-1219, google)
+# - PRIMARY_MODEL, PRIMARY_PROVIDER (default: gemini-3-pro-preview, google)
 # - SECONDARY_MODEL, SECONDARY_PROVIDER (default: gpt-4o, openai)
 # - SWARM_MODEL, SWARM_PROVIDER (default: deepseek-reasoner, deepseek)
 

@@ -54,6 +54,7 @@ export interface Command {
 export interface CommandContext {
   sessionId: string;
   workspaceId: string;
+  setActiveExperiment?: (experiment: any) => void;
 }
 
 /**
@@ -150,19 +151,48 @@ async function handleBacktest(args: string, context: CommandContext): Promise<Co
             message: '❌ Backtest completed but metrics are missing.',
           };
         }
+
+        // Set active experiment if callback provided
+        if (context.setActiveExperiment) {
+          context.setActiveExperiment({
+            id: runData.id,
+            name: `Testing ${strategyKey.replace(/_/g, ' ')}`,
+            strategy: strategyKey,
+            lastRunId: runData.id,
+            lastRunTime: new Date().toLocaleTimeString(),
+            status: 'completed' as const,
+          });
+        }
+
+        // Determine status based on metrics
+        const sharpe = metrics.sharpe;
+        let status: 'success' | 'warning' | 'error' = 'success';
+        if (sharpe > 3) {
+          status = 'warning'; // Potential overfitting
+        } else if (sharpe < 0.5) {
+          status = 'warning'; // Poor performance
+        }
+
+        // Return inline card format
+        const cardData = {
+          type: 'backtest_result',
+          runId: runData.id,
+          strategyName: strategyKey.replace(/_/g, ' '),
+          dateRange: `${startDate} to ${endDate}`,
+          metrics: {
+            sharpe: metrics.sharpe,
+            cagr: metrics.cagr,
+            maxDrawdown: metrics.max_drawdown,
+            winRate: metrics.win_rate,
+            totalTrades: metrics.total_trades,
+            profitFactor: metrics.profit_factor,
+          },
+          status,
+        };
+
         return {
           success: true,
-          message: `✅ Backtest completed!\n\n` +
-            `Strategy: ${strategyKey}\n` +
-            `Period: ${startDate} to ${endDate}\n` +
-            `Capital: $${capital.toLocaleString()}\n\n` +
-            `📊 Results:\n` +
-            `• CAGR: ${(metrics.cagr * 100).toFixed(2)}%\n` +
-            `• Sharpe: ${metrics.sharpe.toFixed(2)}\n` +
-            `• Max Drawdown: ${(metrics.max_drawdown * 100).toFixed(2)}%\n` +
-            `• Win Rate: ${(metrics.win_rate * 100).toFixed(1)}%\n` +
-            `• Total Trades: ${metrics.total_trades}\n\n` +
-            `View full results in the Quant tab.`,
+          message: JSON.stringify(cardData),
           data: runData,
         };
       } else if (runData.status === 'failed') {
@@ -2094,6 +2124,344 @@ async function handleCreateProfile(args: string, _context: CommandContext): Prom
 }
 
 /**
+ * /experiment command - start a named experiment
+ * Usage: /experiment <name> [description]
+ * Examples:
+ *   /experiment momentum-testing Testing different lookback periods
+ *   /experiment vol-spike-v2
+ */
+async function handleExperiment(args: string, context: CommandContext): Promise<CommandResult> {
+  const parts = args.trim().split(/\s+/);
+
+  if (parts.length === 0 || !parts[0]) {
+    return {
+      success: false,
+      message: 'Usage: /experiment <name> [description]\n\nExample: /experiment momentum-testing Testing different lookback periods',
+    };
+  }
+
+  const name = parts[0];
+  const description = parts.slice(1).join(' ') || null;
+
+  try {
+    // Check if experiment with this name already exists
+    const { data: existingExp } = await supabase
+      .from('experiments')
+      .select('id, status')
+      .eq('workspace_id', context.workspaceId)
+      .eq('name', name)
+      .maybeSingle();
+
+    if (existingExp) {
+      if (existingExp.status === 'active') {
+        return {
+          success: false,
+          message: `❌ Experiment "${name}" already exists and is active.\n\nUse /resume ${name} to continue it, or choose a different name.`,
+        };
+      }
+      // Reactivate archived experiment
+      const { error: updateError } = await supabase
+        .from('experiments')
+        .update({ status: 'active', session_id: context.sessionId })
+        .eq('id', existingExp.id);
+
+      if (updateError) throw updateError;
+
+      return {
+        success: true,
+        message: `🔄 Reactivated experiment: **${name}**\n\nAll subsequent /backtest runs will be tagged with this experiment.`,
+        data: { experimentId: existingExp.id, name },
+      };
+    }
+
+    // Create new experiment
+    const { data: newExp, error } = await supabase
+      .from('experiments')
+      .insert({
+        name,
+        description,
+        session_id: context.sessionId,
+        workspace_id: context.workspaceId,
+        status: 'active',
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return {
+      success: true,
+      message: `🧪 Started experiment: **${name}**\n\n${description || 'No description provided.'}\n\nAll subsequent /backtest runs will be tagged with this experiment.\n\nUse /checkpoint to save progress notes, or /experiment <new-name> to start a different experiment.`,
+      data: { experimentId: newExp.id, name },
+    };
+  } catch (error: any) {
+    console.error('Experiment command error:', error);
+    return {
+      success: false,
+      message: `❌ Failed to create experiment: ${error.message || 'Unknown error'}`,
+    };
+  }
+}
+
+/**
+ * /iterate command - re-run last backtest with modified parameters
+ * Usage: /iterate [param=value ...]
+ * Examples:
+ *   /iterate
+ *   /iterate capital=50000
+ *   /iterate lookback=30 threshold=0.02
+ */
+async function handleIterate(args: string, context: CommandContext): Promise<CommandResult> {
+  try {
+    // Get last run from session
+    const { data: lastRun, error: fetchError } = await supabase
+      .from('backtest_runs')
+      .select('*')
+      .eq('session_id', context.sessionId)
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (fetchError) throw fetchError;
+
+    if (!lastRun) {
+      return {
+        success: false,
+        message: '❌ No previous backtest found in this session.\n\nRun /backtest first to establish a baseline.',
+      };
+    }
+
+    // Parse parameter overrides from args
+    const parts = args.trim().split(/\s+/).filter(p => p);
+    const overrides: Record<string, any> = {};
+
+    for (const part of parts) {
+      const [key, value] = part.split('=');
+      if (key && value) {
+        // Try to parse as number, otherwise keep as string
+        overrides[key] = isNaN(Number(value)) ? value : Number(value);
+      }
+    }
+
+    // Build new params by merging with last run
+    const baseParams = lastRun.params || {};
+    const newParams = { ...baseParams, ...overrides };
+
+    // Extract key params for backtest
+    const strategyKey = lastRun.strategy_key;
+    const startDate = newParams.startDate || lastRun.start_date || '2020-01-01';
+    const endDate = newParams.endDate || lastRun.end_date || '2024-12-31';
+    const capital = newParams.capital || lastRun.capital || 100000;
+
+    // Show what's changing
+    const changesList = Object.entries(overrides).length > 0
+      ? Object.entries(overrides).map(([k, v]) => `${k}=${v}`).join(', ')
+      : 'None (re-running with same parameters)';
+
+    // Execute the backtest (reuse handleBacktest logic)
+    const backtestArgs = `${strategyKey} ${startDate} ${endDate} ${capital}`;
+    const result = await handleBacktest(backtestArgs, context);
+
+    // Prepend iteration context to result message
+    if (result.success) {
+      result.message = `🔄 **Iteration of ${strategyKey}**\n\n**Changes:** ${changesList}\n\n${result.message}`;
+    }
+
+    return result;
+  } catch (error: any) {
+    console.error('Iterate command error:', error);
+    return {
+      success: false,
+      message: `❌ Failed to iterate: ${error.message || 'Unknown error'}`,
+    };
+  }
+}
+
+/**
+ * /checkpoint command - save experiment progress with notes
+ * Usage: /checkpoint <notes>
+ * Examples:
+ *   /checkpoint Found lookback=25 works best, trying different thresholds next
+ *   /checkpoint Skew profile works in high VIX regimes, need to test low VIX
+ */
+async function handleCheckpoint(args: string, context: CommandContext): Promise<CommandResult> {
+  const notes = args.trim();
+
+  if (!notes) {
+    return {
+      success: false,
+      message: 'Usage: /checkpoint <notes about current progress>\n\nExample: /checkpoint Found lookback=25 works best, trying different thresholds next',
+    };
+  }
+
+  try {
+    // Get current active experiment if any
+    const { data: experiment } = await supabase
+      .from('experiments')
+      .select('id, name')
+      .eq('workspace_id', context.workspaceId)
+      .eq('session_id', context.sessionId)
+      .eq('status', 'active')
+      .maybeSingle();
+
+    // Count runs in this session
+    const { count: runCount } = await supabase
+      .from('backtest_runs')
+      .select('id', { count: 'exact', head: true })
+      .eq('session_id', context.sessionId);
+
+    // Get best run metrics for snapshot
+    const { data: bestRun } = await supabase
+      .from('backtest_runs')
+      .select('id, strategy_key, metrics, params')
+      .eq('session_id', context.sessionId)
+      .eq('status', 'completed')
+      .order('metrics->sharpe', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const snapshotData = bestRun
+      ? {
+          best_sharpe: bestRun.metrics?.sharpe,
+          best_run_id: bestRun.id,
+          best_strategy: bestRun.strategy_key,
+          params_used: bestRun.params,
+        }
+      : {};
+
+    // Save checkpoint
+    const { data: checkpoint, error } = await supabase
+      .from('experiment_checkpoints')
+      .insert({
+        experiment_id: experiment?.id || null,
+        session_id: context.sessionId,
+        notes,
+        run_count: runCount || 0,
+        snapshot_data: snapshotData,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    const experimentContext = experiment
+      ? `Experiment: **${experiment.name}**\n`
+      : '';
+
+    return {
+      success: true,
+      message: `✅ Checkpoint saved\n\n${experimentContext}**Notes:** ${notes}\n**Runs completed:** ${runCount || 0}\n\nUse /resume to return to this state later.`,
+      data: checkpoint,
+    };
+  } catch (error: any) {
+    console.error('Checkpoint command error:', error);
+    return {
+      success: false,
+      message: `❌ Failed to save checkpoint: ${error.message || 'Unknown error'}`,
+    };
+  }
+}
+
+/**
+ * /resume command - resume a previous experiment
+ * Usage: /resume [experiment-name]
+ * Examples:
+ *   /resume momentum-testing
+ *   /resume (to list available experiments)
+ */
+async function handleResume(args: string, context: CommandContext): Promise<CommandResult> {
+  const name = args.trim();
+
+  try {
+    if (!name) {
+      // List available experiments
+      const { data: experiments, error } = await supabase
+        .from('experiments')
+        .select('name, description, status, created_at, updated_at')
+        .eq('workspace_id', context.workspaceId)
+        .order('updated_at', { ascending: false })
+        .limit(10);
+
+      if (error) throw error;
+
+      if (!experiments || experiments.length === 0) {
+        return {
+          success: true,
+          message: '📋 No experiments found.\n\nStart one with /experiment <name>',
+        };
+      }
+
+      const experimentsList = experiments
+        .map((e) => {
+          const status = e.status === 'active' ? '🟢' : e.status === 'completed' ? '✅' : '📦';
+          const date = new Date(e.updated_at || e.created_at).toLocaleDateString();
+          return `${status} **${e.name}** (${e.status}) - ${date}\n   ${e.description || 'No description'}`;
+        })
+        .join('\n\n');
+
+      return {
+        success: true,
+        message: `📋 Available experiments:\n\n${experimentsList}\n\nUse /resume <name> to continue an experiment.`,
+      };
+    }
+
+    // Find experiment by name (case-insensitive partial match)
+    const { data: experiment, error: fetchError } = await supabase
+      .from('experiments')
+      .select('*')
+      .eq('workspace_id', context.workspaceId)
+      .ilike('name', `%${name}%`)
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (fetchError) throw fetchError;
+
+    if (!experiment) {
+      return {
+        success: false,
+        message: `❌ Experiment "${name}" not found.\n\nUse /resume (without name) to list available experiments.`,
+      };
+    }
+
+    // Get last checkpoint
+    const { data: lastCheckpoint } = await supabase
+      .from('experiment_checkpoints')
+      .select('notes, run_count, created_at')
+      .eq('experiment_id', experiment.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    // Reactivate experiment if not active
+    if (experiment.status !== 'active') {
+      const { error: updateError } = await supabase
+        .from('experiments')
+        .update({ status: 'active', session_id: context.sessionId })
+        .eq('id', experiment.id);
+
+      if (updateError) throw updateError;
+    }
+
+    const checkpointInfo = lastCheckpoint
+      ? `**Last checkpoint (${new Date(lastCheckpoint.created_at).toLocaleDateString()}):**\n${lastCheckpoint.notes}\n**Runs at checkpoint:** ${lastCheckpoint.run_count}`
+      : 'No checkpoints yet.';
+
+    return {
+      success: true,
+      message: `🔄 Resumed experiment: **${experiment.name}**\n\n${experiment.description || ''}\n\n${checkpointInfo}\n\nAll subsequent /backtest runs will be tagged with this experiment.`,
+      data: { experimentId: experiment.id, name: experiment.name },
+    };
+  } catch (error: any) {
+    console.error('Resume command error:', error);
+    return {
+      success: false,
+      message: `❌ Failed to resume experiment: ${error.message || 'Unknown error'}`,
+    };
+  }
+}
+
+/**
  * /help command - show available commands
  */
 async function handleHelp(): Promise<CommandResult> {
@@ -2103,6 +2471,18 @@ async function handleHelp(): Promise<CommandResult> {
       `🔬 /backtest <strategy> [start] [end] [capital]\n` +
       `   Run a backtest for the current session\n` +
       `   Example: /backtest skew_convexity_v1 2020-01-01 2024-12-31 100000\n\n` +
+      `🧪 /experiment <name> [description]\n` +
+      `   Start a named experiment to group related backtest runs\n` +
+      `   Example: /experiment momentum-testing Testing different lookback periods\n\n` +
+      `🔄 /iterate [param=value ...]\n` +
+      `   Re-run the last backtest with modified parameters\n` +
+      `   Example: /iterate capital=50000 lookback=30\n\n` +
+      `📍 /checkpoint <notes>\n` +
+      `   Save experiment progress with notes\n` +
+      `   Example: /checkpoint Found lookback=25 works best\n\n` +
+      `⏮️ /resume [experiment-name]\n` +
+      `   Resume a previous experiment or list available experiments\n` +
+      `   Example: /resume momentum-testing\n\n` +
       `📋 /runs [limit]\n` +
       `   List recent backtest runs (default: 5)\n` +
       `   Example: /runs 10\n\n` +
@@ -2208,6 +2588,34 @@ export const commands: Record<string, Command> = {
     usage: '/backtest <strategy_key> [start_date] [end_date] [capital]',
     handler: handleBacktest,
     tier: undefined, // No chat call, uses backtest-run endpoint
+  },
+  experiment: {
+    name: 'experiment',
+    description: 'Start a named experiment to group related backtest runs',
+    usage: '/experiment <name> [description]',
+    handler: handleExperiment,
+    tier: undefined, // No chat call, pure database operation
+  },
+  iterate: {
+    name: 'iterate',
+    description: 'Re-run the last backtest with modified parameters',
+    usage: '/iterate [param=value ...]',
+    handler: handleIterate,
+    tier: undefined, // Delegates to handleBacktest
+  },
+  checkpoint: {
+    name: 'checkpoint',
+    description: 'Save experiment progress with notes',
+    usage: '/checkpoint <notes>',
+    handler: handleCheckpoint,
+    tier: undefined, // No chat call, pure database operation
+  },
+  resume: {
+    name: 'resume',
+    description: 'Resume a previous experiment or list available experiments',
+    usage: '/resume [experiment-name]',
+    handler: handleResume,
+    tier: undefined, // No chat call, pure database operation
   },
   runs: {
     name: 'runs',

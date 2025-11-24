@@ -238,9 +238,9 @@ The Quant Chat Workbench implements a **three-tier, multi-provider LLM routing s
 **PRIMARY Tier** (`chat-primary`):
 - **Purpose**: High-stakes reasoning, code writing, architecture decisions, final synthesis
 - **Provider**: Google Gemini API
-- **Model**: Configurable via `PRIMARY_MODEL` env (defaults to `gemini-2.0-flash-thinking-exp-1219`)
+- **Model**: Configurable via `PRIMARY_MODEL` env (defaults to `gemini-3-pro-preview`)
 - **Used By**: Main chat interface, `/auto_analyze` final synthesis, user-facing conversation, synthesis of swarm results
-- **Characteristics**: Google Gemini 2.0 Flash with thinking mode for powerful reasoning on novel/complex work
+- **Characteristics**: Google Gemini 3 Pro Preview for powerful reasoning on novel/complex work
 
 **SECONDARY Tier** (future use):
 - **Purpose**: Alternative high-quality reasoning when PRIMARY is unavailable or for specific use cases
@@ -271,7 +271,7 @@ The Quant Chat Workbench implements a **three-tier, multi-provider LLM routing s
 - `LlmTier` type: `'primary' | 'secondary' | 'swarm'`
 - `ProviderName` type: `'openai' | 'google' | 'anthropic' | 'deepseek' | 'custom'`
 - Environment variables:
-  - `PRIMARY_MODEL`, `PRIMARY_PROVIDER` (default: `gemini-2.0-flash-thinking-exp-1219`, `google`)
+  - `PRIMARY_MODEL`, `PRIMARY_PROVIDER` (default: `gemini-3-pro-preview`, `google`)
   - `SECONDARY_MODEL`, `SECONDARY_PROVIDER` (default: `gpt-4o`, `openai`)
   - `SWARM_MODEL`, `SWARM_PROVIDER` (default: `deepseek-reasoner`, `deepseek`)
 - Helpers: `getModelForTier(tier)`, `getProviderForTier(tier)`

@@ -8,6 +8,7 @@ import Database from 'better-sqlite3';
 import { SupabaseClient } from '@supabase/supabase-js';
 import OpenAI from 'openai';
 import pLimit from 'p-limit';
+import { MODELS } from '../../config/models';
 
 interface ExtractedMemory {
   content: string;
@@ -219,7 +220,7 @@ export class MemoryDaemon extends EventEmitter {
       }
 
       const completion = await this.openaiClient.chat.completions.create({
-        model: 'gpt-4o-mini',
+        model: MODELS.MEMORY.model,
         messages: [
           {
             role: 'system',
@@ -368,7 +369,7 @@ export class MemoryDaemon extends EventEmitter {
 
     try {
       const response = await this.openaiClient.embeddings.create({
-        model: 'text-embedding-3-small',
+        model: MODELS.EMBEDDING.model,
         input: text.trim(),
       });
 

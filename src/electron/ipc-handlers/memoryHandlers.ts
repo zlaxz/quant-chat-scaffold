@@ -6,6 +6,17 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import { MemoryDaemon } from '../memory/MemoryDaemon';
 import { RecallEngine } from '../memory/RecallEngine';
+import {
+  validateIPC,
+  MemoryQuerySchema,
+  MemoryOptionsSchema,
+  WorkspaceIdSchema,
+  MemoryIdsSchema,
+  RunIdSchema,
+  StrategyKeySchema,
+  RegimeIdSchema,
+  DateStringSchema,
+} from '../validation/schemas';
 
 let memoryDaemon: MemoryDaemon | null = null;
 let recallEngine: RecallEngine | null = null;
@@ -23,23 +34,23 @@ export function registerMemoryHandlers(): void {
     'memory:recall',
     async (
       _event,
-      query: string,
-      workspaceId: string,
-      options?: {
-        limit?: number;
-        minImportance?: number;
-        useCache?: boolean;
-        rerank?: boolean;
-        categories?: string[];
-        symbols?: string[];
-      }
+      queryRaw: unknown,
+      workspaceIdRaw: unknown,
+      optionsRaw?: unknown
     ) => {
       if (!recallEngine) {
         console.error('[MemoryHandlers] RecallEngine not initialized');
-        return { memories: [], totalFound: 0, searchTimeMs: 0, usedCache: false, query };
+        return { memories: [], totalFound: 0, searchTimeMs: 0, usedCache: false, query: '' };
       }
 
       try {
+        // Validate at IPC boundary
+        const query = validateIPC(MemoryQuerySchema, queryRaw, 'memory query');
+        const workspaceId = validateIPC(WorkspaceIdSchema, workspaceIdRaw, 'workspace ID');
+        const options = optionsRaw !== undefined
+          ? validateIPC(MemoryOptionsSchema, optionsRaw, 'memory options')
+          : undefined;
+
         return await recallEngine.recall(query, workspaceId, options);
       } catch (error: any) {
         console.error('[MemoryHandlers] Recall error:', error);
@@ -55,10 +66,12 @@ export function registerMemoryHandlers(): void {
   });
 
   // Warm cache on session start
-  ipcMain.handle('memory:warmCache', async (_event, workspaceId: string) => {
+  ipcMain.handle('memory:warmCache', async (_event, workspaceIdRaw: unknown) => {
     if (!recallEngine) return { success: false, error: 'RecallEngine not initialized' };
 
     try {
+      // Validate at IPC boundary
+      const workspaceId = validateIPC(WorkspaceIdSchema, workspaceIdRaw, 'workspace ID');
       await recallEngine.warmCache(workspaceId);
       return { success: true };
     } catch (error: any) {
@@ -158,10 +171,12 @@ export function registerAnalysisHandlers(
   triggerRecall: any
 ): void {
   // Overfitting detection
-  ipcMain.handle('analysis:check-overfitting', async (_event, runId: string) => {
+  ipcMain.handle('analysis:check-overfitting', async (_event, runIdRaw: unknown) => {
     if (!overfittingDetector) return { warnings: [] };
 
     try {
+      // Validate at IPC boundary
+      const runId = validateIPC(RunIdSchema, runIdRaw, 'run ID');
       // Fetch run data from Supabase (requires supabase instance passed to handler)
       // For now, return empty warnings - will be enhanced when we have run data
       const warnings = await overfittingDetector.analyzeRun({
@@ -187,27 +202,43 @@ export function registerAnalysisHandlers(
   // Get pre-backtest warnings
   ipcMain.handle(
     'analysis:get-warnings',
-    async (_event, strategy: string, regimeId: number | null, workspaceId: string) => {
+    async (_event, strategyRaw: unknown, regimeIdRaw: unknown, workspaceIdRaw: unknown) => {
       if (!warningSystem) return null;
+
+      // Validate at IPC boundary
+      const strategy = validateIPC(StrategyKeySchema, strategyRaw, 'strategy key');
+      const regimeId = validateIPC(RegimeIdSchema, regimeIdRaw, 'regime ID');
+      const workspaceId = validateIPC(WorkspaceIdSchema, workspaceIdRaw, 'workspace ID');
+
       return await warningSystem.getRelevantWarnings(strategy, regimeId, workspaceId);
     }
   );
 
   // Get stale memories for injection
-  ipcMain.handle('memory:get-stale', async (_event, workspaceId: string) => {
+  ipcMain.handle('memory:get-stale', async (_event, workspaceIdRaw: unknown) => {
     if (!staleInjector) return [];
+
+    // Validate at IPC boundary
+    const workspaceId = validateIPC(WorkspaceIdSchema, workspaceIdRaw, 'workspace ID');
     return await staleInjector.getStaleMemories(workspaceId);
   });
 
   // Trigger-based recall
-  ipcMain.handle('memory:check-triggers', async (_event, message: string, workspaceId: string) => {
+  ipcMain.handle('memory:check-triggers', async (_event, messageRaw: unknown, workspaceIdRaw: unknown) => {
     if (!triggerRecall) return [];
+
+    // Validate at IPC boundary
+    const message = validateIPC(MemoryQuerySchema, messageRaw, 'message');
+    const workspaceId = validateIPC(WorkspaceIdSchema, workspaceIdRaw, 'workspace ID');
     return await triggerRecall.checkTriggers(message, workspaceId);
   });
 
   // Pattern detection
-  ipcMain.handle('analysis:detect-patterns', async (_event, workspaceId: string) => {
+  ipcMain.handle('analysis:detect-patterns', async (_event, workspaceIdRaw: unknown) => {
     if (!patternDetector) return { repeated_lessons: [], regime_patterns: [] };
+
+    // Validate at IPC boundary
+    const workspaceId = validateIPC(WorkspaceIdSchema, workspaceIdRaw, 'workspace ID');
     const [repeated, regimePatterns] = await Promise.all([
       patternDetector.detectRepeatedLessons(workspaceId),
       patternDetector.detectRegimeProfilePatterns(workspaceId),
@@ -218,10 +249,15 @@ export function registerAnalysisHandlers(
   // Regime tagging for backtest runs
   ipcMain.handle(
     'analysis:tag-regime',
-    async (_event, runId: string, startDate: string, endDate: string) => {
+    async (_event, runIdRaw: unknown, startDateRaw: unknown, endDateRaw: unknown) => {
       if (!regimeTagger) return { success: false, error: 'RegimeTagger not initialized' };
 
       try {
+        // Validate at IPC boundary
+        const runId = validateIPC(RunIdSchema, runIdRaw, 'run ID');
+        const startDate = validateIPC(DateStringSchema, startDateRaw, 'start date');
+        const endDate = validateIPC(DateStringSchema, endDateRaw, 'end date');
+
         const regime = await regimeTagger.tagRun(runId, startDate, endDate);
         return { success: true, regime };
       } catch (error: any) {
@@ -232,10 +268,12 @@ export function registerAnalysisHandlers(
   );
 
   // Mark memories as recalled for stale injection tracking
-  ipcMain.handle('memory:mark-recalled', async (_event, memoryIds: string[]) => {
+  ipcMain.handle('memory:mark-recalled', async (_event, memoryIdsRaw: unknown) => {
     if (!staleInjector) return { success: false, error: 'StaleInjector not initialized' };
 
     try {
+      // Validate at IPC boundary
+      const memoryIds = validateIPC(MemoryIdsSchema, memoryIdsRaw, 'memory IDs');
       await staleInjector.markAsRecalled(memoryIds);
       return { success: true };
     } catch (error: any) {
