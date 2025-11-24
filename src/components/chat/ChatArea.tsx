@@ -217,12 +217,8 @@ export const ChatArea = () => {
           { role: 'user', content: messageContent }
         ];
 
-        // Call LLM via Electron IPC with correct signature
-        const response = await chatPrimary({
-          sessionId: selectedSessionId,
-          workspaceId: selectedWorkspaceId,
-          content: messageContent
-        });
+        // Call LLM via Electron IPC
+        const response = await chatPrimary(llmMessages);
 
         // Add assistant response to UI
         const assistantMessage: Message = {
