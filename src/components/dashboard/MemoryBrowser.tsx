@@ -95,7 +95,7 @@ export function MemoryBrowser() {
       setLoading(true);
 
       let query = supabase
-        .from('memory_notes')
+        .from('memories')
         .select('*')
         .order('created_at', { ascending: false })
         .limit(100);

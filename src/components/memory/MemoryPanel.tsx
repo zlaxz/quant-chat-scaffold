@@ -59,7 +59,7 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
 
       // Get total count
       const { count, error: countError } = await supabase
-        .from('memory_notes')
+        .from('memories')
         .select('*', { count: 'exact', head: true })
         .eq('workspace_id', selectedWorkspaceId)
         .eq('archived', viewMode === 'archived');
@@ -69,7 +69,7 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
 
       // Get paginated data
       const { data, error } = await supabase
-        .from('memory_notes')
+        .from('memories')
         .select('*')
         .eq('workspace_id', selectedWorkspaceId)
         .eq('archived', viewMode === 'archived')

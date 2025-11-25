@@ -568,7 +568,7 @@ async function handleAuditRun(args: string, context: CommandContext): Promise<Co
     // Fetch relevant memory notes
     // Priority: run-linked notes, then strategy-tagged notes, then general high-importance
     const { data: memoryData, error: memoryError } = await supabase
-      .from('memory_notes')
+      .from('memories')
       .select('*')
       .eq('workspace_id', context.workspaceId)
       .eq('archived', false)
@@ -653,7 +653,7 @@ async function handleMinePatterns(args: string, context: CommandContext): Promis
 
     // Fetch relevant memory notes
     const { data: memoryData, error: memoryError } = await supabase
-      .from('memory_notes')
+      .from('memories')
       .select('*')
       .eq('workspace_id', context.workspaceId)
       .eq('archived', false)
@@ -716,7 +716,7 @@ async function handleCurateMemory(
   try {
     // Fetch all non-archived memory for this workspace
     const { data: notes, error: notesError } = await supabase
-      .from('memory_notes')
+      .from('memories')
       .select('*')
       .eq('workspace_id', context.workspaceId)
       .eq('archived', false)
@@ -805,7 +805,7 @@ async function handleSuggestExperiments(
 
     // Fetch relevant memory notes
     const { data: memoryData, error: memoryError } = await supabase
-      .from('memory_notes')
+      .from('memories')
       .select('*')
       .eq('workspace_id', context.workspaceId)
       .eq('archived', false)
@@ -919,7 +919,7 @@ async function handleRiskReview(args: string, context: CommandContext): Promise<
 
     // Fetch relevant memory notes
     const { data: memoryData, error: memoryError } = await supabase
-      .from('memory_notes')
+      .from('memories')
       .select('*')
       .eq('workspace_id', context.workspaceId)
       .eq('archived', false)
@@ -1203,7 +1203,7 @@ async function handleAutoAnalyze(args: string, context: CommandContext): Promise
 
     // Fetch memory notes
     const { data: memoryData, error: memoryError } = await supabase
-      .from('memory_notes')
+      .from('memories')
       .select('*')
       .eq('workspace_id', context.workspaceId)
       .eq('archived', false)

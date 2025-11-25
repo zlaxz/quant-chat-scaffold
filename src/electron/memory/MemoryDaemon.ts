@@ -294,7 +294,7 @@ export class MemoryDaemon extends EventEmitter {
 
     if (supabaseRecords.length > 0) {
       const { data, error } = await this.supabase
-        .from('memory_notes')
+        .from('memories')
         .insert(supabaseRecords)
         .select('id');
 

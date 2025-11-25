@@ -294,12 +294,25 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
       }
 
       // Get final text response
-      const finalText = (response as any).text();
+      let finalText = (response as any).text() || '';
 
-      // Build visible tool call log
-      const toolSummary = toolCallLog.length > 0
-        ? `\n\n---\n**🔧 Tool Calls (${iterations} iteration${iterations !== 1 ? 's' : ''}):**\n\`\`\`\n${toolCallLog.join('\n')}\n\`\`\``
-        : '';
+      // If we did tool calls but got no final text, ask model to synthesize
+      if (!finalText.trim() && iterations > 0 && allToolOutputs.length > 0) {
+        console.log('[LLM] No final text after tool calls, requesting synthesis...');
+        _event.sender.send('llm-stream', {
+          type: 'thinking',
+          content: '\n\n*Synthesizing response from tool results...*\n\n',
+          timestamp: Date.now()
+        });
+
+        // Ask model to synthesize a response from tool outputs
+        const synthesisPrompt = `Based on the tool results above, please provide a helpful response to the user's original question. Be concise and direct.`;
+        const synthesisResponse = await streamMessage(synthesisPrompt);
+        finalText = (synthesisResponse as any).text() || 'I explored the codebase but could not generate a summary. Please try a more specific question.';
+      }
+
+      // Build visible tool call log (only show if user wants verbose output)
+      const toolSummary = '';  // Removed verbose tool log - tools are shown in real-time now
 
       // Signal streaming complete
       _event.sender.send('llm-stream', {

@@ -115,7 +115,7 @@ export class WarningSystem {
 
     try {
       const { data, error } = await this.supabase
-        .from('memory_notes')
+        .from('memories')
         .select('*')
         .eq('workspace_id', workspaceId)
         .eq('memory_type', 'warning')
@@ -147,7 +147,7 @@ export class WarningSystem {
 
     try {
       const { data, error } = await this.supabase
-        .from('memory_notes')
+        .from('memories')
         .select('*')
         .eq('workspace_id', workspaceId)
         .lte('protection_level', 1)

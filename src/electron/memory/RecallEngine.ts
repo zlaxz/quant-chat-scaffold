@@ -512,7 +512,7 @@ export class RecallEngine {
     memoryIds.forEach(async (id) => {
       try {
         const { data: current } = await this.supabase
-          .from('memory_notes')
+          .from('memories')
           .select('metadata')
           .eq('id', id)
           .single();
@@ -522,7 +522,7 @@ export class RecallEngine {
           const accessCount = (metadata.access_count || 0) + 1;
           
           await this.supabase
-            .from('memory_notes')
+            .from('memories')
             .update({
               metadata: { ...metadata, access_count: accessCount },
               updated_at: new Date().toISOString(),
