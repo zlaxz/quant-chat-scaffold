@@ -54,7 +54,7 @@ export function registerMemoryHandlers(): void {
         return await recallEngine.recall(query, workspaceId, options);
       } catch (error: any) {
         console.error('[MemoryHandlers] Recall error:', error);
-        return { memories: [], totalFound: 0, searchTimeMs: 0, usedCache: false, query, error: error.message };
+        return { memories: [], totalFound: 0, searchTimeMs: 0, usedCache: false, query: query, error: error.message };
       }
     }
   );
