@@ -11,15 +11,27 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { RefreshCw, ArrowLeft, Moon, Activity, Database } from 'lucide-react';
+import { RefreshCw, ArrowLeft, Moon, Activity, Database, LayoutGrid, List } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/integrations/supabase/client';
 
 import { RegimeDisplay, type RegimeState, type ConvexityBias } from '@/components/dashboard/RegimeDisplay';
 import { SymphonyOrchestra, type StrategySlot } from '@/components/dashboard/SymphonyOrchestra';
 import { BriefingDeck, type BriefingCard } from '@/components/dashboard/BriefingDeck';
+
+// New dashboard components
+import { ActivityFeed } from '@/components/dashboard/ActivityFeed';
+import { ShadowPositionMonitor } from '@/components/dashboard/ShadowPositionMonitor';
+import { MorningBriefingViewer } from '@/components/dashboard/MorningBriefingViewer';
+import { RegimeIndicator } from '@/components/dashboard/RegimeIndicator';
+import { DataInventory } from '@/components/dashboard/DataInventory';
+import { StrategyGenomeBrowser } from '@/components/dashboard/StrategyGenomeBrowser';
+import { BacktestRunner } from '@/components/dashboard/BacktestRunner';
+import { TokenSpendTracker } from '@/components/dashboard/TokenSpendTracker';
+import { MemoryBrowser } from '@/components/dashboard/MemoryBrowser';
 
 // ============================================================================
 // Types
@@ -227,10 +239,9 @@ export default function Dashboard() {
 
   const handlePromote = async (briefing: BriefingCard) => {
     console.log('Promoting strategy:', briefing.strategyId);
-    // TODO: Call promote_strategy RPC
     try {
-      await supabase.rpc('promote_strategy', {
-        strategy_uuid: briefing.strategyId,
+      await supabase.rpc('promote_strategy_simple', {
+        p_strategy_id: briefing.strategyId,
       });
       refresh();
     } catch (err) {
@@ -263,8 +274,11 @@ export default function Dashboard() {
           </div>
 
           <div className="flex items-center gap-4">
+            {/* Regime Indicator */}
+            <RegimeIndicator />
+
             {/* Daemon Status */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 border-l pl-4">
               <div
                 className={cn(
                   'w-2 h-2 rounded-full',
@@ -321,32 +335,104 @@ export default function Dashboard() {
             </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left Column: Regime & Symphony */}
-            <div className="lg:col-span-2 space-y-6">
-              {/* Regime Display */}
-              <RegimeDisplay
-                regimeState={regimeState}
-                convexityBias={convexityBias}
-              />
+          <Tabs defaultValue="overview" className="space-y-4">
+            <TabsList>
+              <TabsTrigger value="overview">Overview</TabsTrigger>
+              <TabsTrigger value="strategies">Strategies</TabsTrigger>
+              <TabsTrigger value="trading">Trading</TabsTrigger>
+              <TabsTrigger value="infrastructure">Infrastructure</TabsTrigger>
+            </TabsList>
 
-              {/* Symphony Orchestra */}
-              <SymphonyOrchestra
-                strategies={strategies}
-                currentRegime={regimeState?.regime || 'UNKNOWN'}
-                onStrategyClick={handleStrategyClick}
-              />
-            </div>
+            {/* Overview Tab */}
+            <TabsContent value="overview" className="space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* Left Column: Regime & Symphony */}
+                <div className="lg:col-span-2 space-y-4">
+                  {/* Regime Display */}
+                  <RegimeDisplay
+                    regimeState={regimeState}
+                    convexityBias={convexityBias}
+                  />
 
-            {/* Right Column: Briefings */}
-            <div className="lg:col-span-1">
-              <BriefingDeck
-                briefings={briefings}
-                onBriefingClick={handleBriefingClick}
-                onPromote={handlePromote}
-              />
-            </div>
-          </div>
+                  {/* Symphony Orchestra */}
+                  <SymphonyOrchestra
+                    strategies={strategies}
+                    currentRegime={regimeState?.regime || 'UNKNOWN'}
+                    onStrategyClick={handleStrategyClick}
+                  />
+                </div>
+
+                {/* Right Column: Activity & Briefings */}
+                <div className="space-y-4">
+                  <div className="h-[300px]">
+                    <ActivityFeed />
+                  </div>
+                  <div className="h-[350px]">
+                    <MorningBriefingViewer />
+                  </div>
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* Strategies Tab */}
+            <TabsContent value="strategies" className="space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* Strategy Browser */}
+                <div className="lg:col-span-2 h-[600px]">
+                  <StrategyGenomeBrowser />
+                </div>
+
+                {/* Backtest Runner */}
+                <div className="h-[600px]">
+                  <BacktestRunner />
+                </div>
+              </div>
+
+              {/* Briefing Deck */}
+              <div className="h-[400px]">
+                <BriefingDeck
+                  briefings={briefings}
+                  onBriefingClick={handleBriefingClick}
+                  onPromote={handlePromote}
+                />
+              </div>
+            </TabsContent>
+
+            {/* Trading Tab */}
+            <TabsContent value="trading" className="space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* Shadow Position Monitor */}
+                <div className="h-[500px]">
+                  <ShadowPositionMonitor />
+                </div>
+
+                {/* Activity Feed */}
+                <div className="h-[500px]">
+                  <ActivityFeed />
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* Infrastructure Tab */}
+            <TabsContent value="infrastructure" className="space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                {/* Data Inventory */}
+                <div className="h-[500px]">
+                  <DataInventory />
+                </div>
+
+                {/* Token Spend Tracker */}
+                <div className="h-[500px]">
+                  <TokenSpendTracker />
+                </div>
+
+                {/* Memory Browser */}
+                <div className="h-[500px]">
+                  <MemoryBrowser />
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
         )}
       </main>
     </div>

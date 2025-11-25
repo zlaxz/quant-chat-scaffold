@@ -150,26 +150,33 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
         timestamp: Date.now()
       });
 
-      // Tool execution loop - use streaming for initial response
+      // Tool execution loop - use streaming for all responses
       let response;
-      try {
-        const streamResult = await chat.sendMessageStream(lastMessage.content);
-        for await (const chunk of streamResult.stream) {
-          const text = chunk.text();
-          if (text) {
-            _event.sender.send('llm-stream', {
-              type: 'chunk',
-              content: text,
-              timestamp: Date.now()
-            });
+
+      // Helper to stream a message and return response
+      const streamMessage = async (content: string | Array<any>) => {
+        try {
+          const streamResult = await chat.sendMessageStream(content);
+          for await (const chunk of streamResult.stream) {
+            const text = chunk.text();
+            if (text) {
+              _event.sender.send('llm-stream', {
+                type: 'chunk',
+                content: text,
+                timestamp: Date.now()
+              });
+            }
           }
+          return await streamResult.response;
+        } catch (error) {
+          // Fallback to non-streaming if streaming fails
+          console.warn('[LLM] Streaming failed, falling back to non-streaming:', error);
+          return await withRetry(() => chat.sendMessage(content));
         }
-        response = await streamResult.response;
-      } catch (error) {
-        // Fallback to non-streaming if streaming fails
-        console.warn('[LLM] Streaming failed, falling back to non-streaming:', error);
-        response = await withRetry(() => chat.sendMessage(lastMessage.content));
-      }
+      };
+
+      // Initial response with streaming
+      response = await streamMessage(lastMessage.content);
 
       let iterations = 0;
       let allToolOutputs: string[] = [];
@@ -276,8 +283,13 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
           }
         }
 
-        // Send tool results back to the model
-        response = await withRetry(() => chat.sendMessage(toolResults));
+        // Send tool results back to the model with streaming
+        _event.sender.send('llm-stream', {
+          type: 'thinking',
+          content: `\n\n*Analyzing tool results (iteration ${iterations + 1})...*\n\n`,
+          timestamp: Date.now()
+        });
+        response = await streamMessage(toolResults);
         iterations++;
       }
 
@@ -289,6 +301,12 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
         ? `\n\n---\n**🔧 Tool Calls (${iterations} iteration${iterations !== 1 ? 's' : ''}):**\n\`\`\`\n${toolCallLog.join('\n')}\n\`\`\``
         : '';
 
+      // Signal streaming complete
+      _event.sender.send('llm-stream', {
+        type: 'done',
+        timestamp: Date.now()
+      });
+
       return {
         content: finalText + toolSummary,
         provider: PRIMARY_PROVIDER,
@@ -297,6 +315,12 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
       };
     } catch (error) {
       console.error('Error in chat-primary:', error);
+      // Signal error
+      _event.sender.send('llm-stream', {
+        type: 'error',
+        error: error instanceof Error ? error.message : 'Unknown error',
+        timestamp: Date.now()
+      });
       throw error;
     }
   });

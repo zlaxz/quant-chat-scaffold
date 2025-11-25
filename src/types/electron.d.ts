@@ -133,7 +133,7 @@ interface ElectronAPI {
 
   // LLM streaming events (for real-time text streaming)
   onLLMStream: (callback: (data: {
-    type: 'chunk' | 'done' | 'error';
+    type: 'chunk' | 'done' | 'error' | 'thinking';
     content?: string;
     error?: string;
     timestamp: number;

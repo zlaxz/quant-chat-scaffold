@@ -64,7 +64,7 @@ export class StaleMemoryInjector {
         }
 
         const { data, error } = await this.supabase
-          .from('memories')
+          .from('memory_notes')
           .select('id, content, summary, protection_level, financial_impact, last_recalled_at')
           .eq('workspace_id', workspaceId)
           .eq('protection_level', parseInt(level))
@@ -163,7 +163,7 @@ export class StaleMemoryInjector {
     if (memoryIds.length === 0) return;
 
     const { error } = await this.supabase
-      .from('memories')
+      .from('memory_notes')
       .update({ last_recalled_at: new Date().toISOString() })
       .in('id', memoryIds);
 

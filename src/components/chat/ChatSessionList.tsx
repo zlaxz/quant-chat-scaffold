@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -50,11 +50,7 @@ export const ChatSessionList = () => {
   const [newName, setNewName] = useState('');
   const { state } = useSidebar();
 
-  useEffect(() => {
-    loadSessions();
-  }, []);
-
-  const loadSessions = async () => {
+  const loadSessions = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from('chat_sessions')
@@ -65,7 +61,7 @@ export const ChatSessionList = () => {
       if (error) throw error;
 
       setSessions(data || []);
-      
+
       // Auto-select first session if none selected
       if (data && data.length > 0 && !selectedSessionId) {
         setSelectedSession(data[0].id, data[0].workspace_id);
@@ -76,7 +72,11 @@ export const ChatSessionList = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedSessionId, setSelectedSession]);
+
+  useEffect(() => {
+    loadSessions();
+  }, [loadSessions]);
 
   const createNewSession = async () => {
     try {

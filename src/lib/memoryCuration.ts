@@ -1,19 +1,6 @@
 // Memory curation helpers for analyzing and improving the knowledge base
 
-interface MemoryNote {
-  id: string;
-  workspace_id: string;
-  content: string;
-  source: string;
-  tags: string[];
-  created_at: string;
-  run_id: string | null;
-  metadata: Record<string, any>;
-  memory_type: string;
-  importance: string;
-  archived: boolean;
-  embedding: string | null;
-}
+import type { MemoryNote } from '@/types/memory';
 
 /**
  * Group memory notes by strategy tag

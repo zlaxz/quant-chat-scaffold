@@ -108,12 +108,22 @@ async function startDaemon(): Promise<{ success: boolean; pid?: number; error?: 
       daemonProcess = null;
       daemonPid = null;
 
+      // Skip auto-restart if we're in the middle of a manual restart operation
+      if (isRestarting) {
+        addLog('Exit during restart operation - skipping auto-restart');
+        sendStatusUpdate('offline');
+        return;
+      }
+
       if (code !== 0 && autoRestartEnabled && restartAttempts < MAX_RESTART_ATTEMPTS) {
         sendStatusUpdate('crashed');
         restartAttempts++;
         addLog(`Auto-restart attempt ${restartAttempts}/${MAX_RESTART_ATTEMPTS} in ${RESTART_DELAY_MS / 1000}s...`);
         setTimeout(() => {
-          startDaemon();
+          // Double-check we're not in a restart operation
+          if (!isRestarting) {
+            startDaemon();
+          }
         }, RESTART_DELAY_MS);
       } else {
         sendStatusUpdate('offline');
@@ -185,11 +195,38 @@ async function stopDaemon(): Promise<{ success: boolean; error?: string }> {
   }
 }
 
+// Flag to prevent race conditions during restart
+let isRestarting = false;
+
 async function restartDaemon(): Promise<{ success: boolean; pid?: number; error?: string }> {
-  await stopDaemon();
-  autoRestartEnabled = true; // Re-enable auto-restart
-  restartAttempts = 0;
-  return startDaemon();
+  // Prevent concurrent restart attempts
+  if (isRestarting) {
+    return { success: false, error: 'Restart already in progress' };
+  }
+
+  isRestarting = true;
+
+  try {
+    // Disable auto-restart during manual restart to prevent race
+    autoRestartEnabled = false;
+
+    // Stop and wait for complete cleanup
+    const stopResult = await stopDaemon();
+    if (!stopResult.success) {
+      addLog(`Warning: Stop returned error: ${stopResult.error}`);
+    }
+
+    // Small delay to ensure process cleanup
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    // Reset state and re-enable auto-restart
+    autoRestartEnabled = true;
+    restartAttempts = 0;
+
+    return startDaemon();
+  } finally {
+    isRestarting = false;
+  }
 }
 
 function getDaemonStatus(): {
@@ -299,9 +336,38 @@ export function registerDaemonHandlers() {
   });
 }
 
-// Export for main.ts cleanup
+// Export for main.ts cleanup - synchronous cleanup on app exit
 export function stopDaemonOnExit() {
-  if (daemonProcess) {
+  if (!daemonProcess) return;
+
+  autoRestartEnabled = false;
+  const pid = daemonPid;
+
+  // Try graceful SIGTERM first
+  try {
     daemonProcess.kill('SIGTERM');
+  } catch (error) {
+    console.error('[DaemonManager] SIGTERM failed:', error);
   }
+
+  // Force kill after 3 seconds if still running
+  setTimeout(() => {
+    if (daemonProcess && !daemonProcess.killed) {
+      console.log('[DaemonManager] Process still running, sending SIGKILL');
+      try {
+        daemonProcess.kill('SIGKILL');
+      } catch (error) {
+        console.error('[DaemonManager] SIGKILL failed:', error);
+
+        // Last resort: kill by PID directly if we have it
+        if (pid) {
+          try {
+            process.kill(pid, 'SIGKILL');
+          } catch (e) {
+            console.error(`[DaemonManager] Direct PID kill failed: ${e}`);
+          }
+        }
+      }
+    }
+  }, 3000);
 }

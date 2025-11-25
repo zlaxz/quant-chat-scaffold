@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -14,21 +14,7 @@ import { useChatContext } from '@/contexts/ChatContext';
 import { format } from 'date-fns';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-
-interface MemoryNote {
-  id: string;
-  workspace_id: string;
-  content: string;
-  source: string;
-  tags: string[];
-  created_at: string;
-  updated_at?: string;
-  run_id: string | null;
-  metadata: any;
-  memory_type: string;
-  importance: string;
-  archived: boolean;
-}
+import type { MemoryNote } from '@/types/memory';
 
 interface MemoryPanelProps {
   onViewRun?: (runId: string) => void;
@@ -64,34 +50,16 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
   const [editImportance, setEditImportance] = useState('normal');
   const [isUpdating, setIsUpdating] = useState(false);
 
-  useEffect(() => {
-    if (selectedWorkspaceId) {
-      setCurrentPage(1); // Reset to first page on workspace/view change
-      loadMemoryNotes();
-      setFilterType('all');
-      setFilterImportance('all');
-      setHasSearched(false);
-      setSearchQuery('');
-      setSearchResults([]);
-    }
-  }, [selectedWorkspaceId, viewMode]);
-  
-  useEffect(() => {
-    if (selectedWorkspaceId && !hasSearched) {
-      loadMemoryNotes();
-    }
-  }, [currentPage]);
-
-  const loadMemoryNotes = async () => {
+  const loadMemoryNotes = useCallback(async () => {
     if (!selectedWorkspaceId) return;
 
     setIsLoading(true);
     try {
       const offset = (currentPage - 1) * itemsPerPage;
-      
+
       // Get total count
       const { count, error: countError } = await supabase
-        .from('memories')
+        .from('memory_notes')
         .select('*', { count: 'exact', head: true })
         .eq('workspace_id', selectedWorkspaceId)
         .eq('archived', viewMode === 'archived');
@@ -101,7 +69,7 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
 
       // Get paginated data
       const { data, error } = await supabase
-        .from('memories')
+        .from('memory_notes')
         .select('*')
         .eq('workspace_id', selectedWorkspaceId)
         .eq('archived', viewMode === 'archived')
@@ -117,7 +85,25 @@ export const MemoryPanel = ({ onViewRun }: MemoryPanelProps) => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [selectedWorkspaceId, viewMode, currentPage]);
+
+  useEffect(() => {
+    if (selectedWorkspaceId) {
+      setCurrentPage(1); // Reset to first page on workspace/view change
+      loadMemoryNotes();
+      setFilterType('all');
+      setFilterImportance('all');
+      setHasSearched(false);
+      setSearchQuery('');
+      setSearchResults([]);
+    }
+  }, [selectedWorkspaceId, viewMode, loadMemoryNotes]);
+
+  useEffect(() => {
+    if (selectedWorkspaceId && !hasSearched) {
+      loadMemoryNotes();
+    }
+  }, [currentPage, selectedWorkspaceId, hasSearched, loadMemoryNotes]);
 
   const saveMemoryNote = async () => {
     if (!selectedWorkspaceId || !newNoteContent.trim()) {

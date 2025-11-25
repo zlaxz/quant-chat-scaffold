@@ -31,7 +31,7 @@ export class PatternDetector {
    */
   async detectRepeatedLessons(workspaceId: string): Promise<Pattern[]> {
     const { data: memories } = await this.supabase
-      .from('memories')
+      .from('memory_notes')
       .select('*')
       .eq('workspace_id', workspaceId)
       .eq('memory_type', 'lesson')

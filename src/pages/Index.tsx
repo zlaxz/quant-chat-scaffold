@@ -10,6 +10,7 @@ import { HelperChatDialog } from '@/components/chat/HelperChatDialog';
 import { Button } from '@/components/ui/button';
 import { HelpCircle, Settings, LayoutDashboard, Command } from 'lucide-react';
 import { SystemStatus } from '@/components/dashboard/SystemStatus';
+import { RegimeIndicator } from '@/components/dashboard/RegimeIndicator';
 
 const Index = () => {
   const [helperOpen, setHelperOpen] = useState(false);
@@ -32,8 +33,9 @@ const Index = () => {
             </kbd>
           </div>
 
-          {/* System Status (Heartbeat) */}
+          {/* System Status (Heartbeat) + Regime */}
           <div className="flex items-center gap-4">
+            <RegimeIndicator />
             <SystemStatus />
 
             <div className="flex items-center gap-2 border-l pl-4">

@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Send, Loader2, Command, Slash, Wrench } from 'lucide-react';
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useChatContext } from '@/contexts/ChatContext';
@@ -101,62 +101,8 @@ export const ChatArea = () => {
     return () => setWriteConfirmationCallback(undefined);
   }, [showConfirmation]);
 
-  // Subscribe to IPC events for tool progress and streaming
-  useEffect(() => {
-    // Subscribe to tool progress
-    const unsubscribeTool = window.electron.onToolProgress((data) => {
-      setToolProgress(prev => [...prev, data]);
-    });
-
-    // Subscribe to LLM streaming
-    const unsubscribeStream = window.electron.onLLMStream((data) => {
-      if (data.type === 'chunk' && data.content) {
-        setStreamingContent(prev => prev + data.content);
-        setIsStreaming(true);
-      } else if (data.type === 'done') {
-        setIsStreaming(false);
-      }
-    });
-
-    return () => {
-      unsubscribeTool();
-      unsubscribeStream();
-    };
-  }, []);
-
-  // Load messages when session changes
-  useEffect(() => {
-    if (selectedSessionId) {
-      loadMessages();
-    } else {
-      setMessages([]);
-    }
-  }, [selectedSessionId]);
-
-  // Auto-scroll to bottom when messages, tool progress, or streaming content change
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, toolProgress, streamingContent]);
-
-  // Update command suggestions and intent detection when input changes
-  useEffect(() => {
-    if (inputValue.startsWith('/')) {
-      const suggestions = getCommandSuggestions(inputValue);
-      setCommandSuggestions(suggestions);
-      setIntentSuggestion(null); // Clear intent when typing slash command
-    } else {
-      setCommandSuggestions([]);
-      // Detect intent for natural language input
-      const intent = detectIntent(inputValue);
-      if (intent && intent.confidence >= 0.7) {
-        setIntentSuggestion(intent);
-      } else {
-        setIntentSuggestion(null);
-      }
-    }
-  }, [inputValue]);
-
-  const loadMessages = async () => {
+  // Define loadMessages BEFORE the useEffect that depends on it (prevents TDZ error)
+  const loadMessages = useCallback(async () => {
     if (!selectedSessionId) return;
 
     try {
@@ -188,7 +134,71 @@ export const ChatArea = () => {
     } finally {
       setIsFetchingMessages(false);
     }
-  };
+  }, [selectedSessionId, selectedWorkspaceId, toast]);
+
+  // Subscribe to IPC events for tool progress and streaming
+  useEffect(() => {
+    // Subscribe to tool progress
+    const unsubscribeTool = window.electron.onToolProgress((data) => {
+      setToolProgress(prev => [...prev, data]);
+    });
+
+    // Subscribe to LLM streaming
+    const unsubscribeStream = window.electron.onLLMStream((data) => {
+      if (data.type === 'chunk' && data.content) {
+        setStreamingContent(prev => prev + data.content);
+        setIsStreaming(true);
+      } else if (data.type === 'thinking' && data.content) {
+        // Show thinking/reasoning text in italics
+        setStreamingContent(prev => prev + data.content);
+        setIsStreaming(true);
+      } else if (data.type === 'done') {
+        setIsStreaming(false);
+        // Clear streaming content after it's shown in final message
+        setTimeout(() => setStreamingContent(''), 100);
+      } else if (data.type === 'error') {
+        setIsStreaming(false);
+        setStreamingContent('');
+      }
+    });
+
+    return () => {
+      unsubscribeTool();
+      unsubscribeStream();
+    };
+  }, []);
+
+  // Load messages when session changes
+  useEffect(() => {
+    if (selectedSessionId) {
+      loadMessages();
+    } else {
+      setMessages([]);
+    }
+  }, [selectedSessionId, loadMessages]);
+
+  // Auto-scroll to bottom when messages, tool progress, or streaming content change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, toolProgress, streamingContent]);
+
+  // Update command suggestions and intent detection when input changes
+  useEffect(() => {
+    if (inputValue.startsWith('/')) {
+      const suggestions = getCommandSuggestions(inputValue);
+      setCommandSuggestions(suggestions);
+      setIntentSuggestion(null); // Clear intent when typing slash command
+    } else {
+      setCommandSuggestions([]);
+      // Detect intent for natural language input
+      const intent = detectIntent(inputValue);
+      if (intent && intent.confidence >= 0.7) {
+        setIntentSuggestion(intent);
+      } else {
+        setIntentSuggestion(null);
+      }
+    }
+  }, [inputValue]);
 
   const sendMessage = async () => {
     if (!inputValue.trim() || !selectedSessionId || !selectedWorkspaceId) return;
@@ -580,41 +590,73 @@ export const ChatArea = () => {
               />
             )}
 
-            {/* Thinking/Tool indicator with real-time progress */}
+            {/* Live Agent Activity - Streaming, Tools, Thinking */}
             {isLoading && !activeSwarmJob && (
               <div className="flex justify-start">
-                <div className="bg-muted rounded-lg px-4 py-3 w-full max-w-[90%]">
-                  {/* Streaming content */}
+                <div className="bg-gradient-to-r from-blue-950/50 to-purple-950/50 border border-blue-500/20 rounded-lg px-4 py-3 w-full max-w-[95%]">
+                  {/* Header */}
+                  <div className="flex items-center gap-2 mb-2 pb-2 border-b border-blue-500/20">
+                    <div className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+                    <span className="text-xs font-medium text-blue-400">Agent Working</span>
+                    {toolProgress.filter(p => p.type === 'completed').length > 0 && (
+                      <span className="text-xs text-muted-foreground ml-auto">
+                        {toolProgress.filter(p => p.type === 'completed').length} tools executed
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Streaming content - main response text */}
                   {streamingContent && (
-                    <div className="text-sm mb-3 whitespace-pre-wrap">{streamingContent}</div>
+                    <div className="text-sm mb-3 whitespace-pre-wrap prose prose-invert prose-sm max-w-none">
+                      {streamingContent}
+                      <span className="inline-block w-2 h-4 bg-blue-400 animate-pulse ml-1" />
+                    </div>
                   )}
 
-                  {/* Tool progress */}
-                  {toolProgress.length > 0 ? (
-                    <div className="space-y-1">
-                      {toolProgress.map((progress, idx) => (
-                        <div key={idx} className="text-xs font-mono">
-                          {progress.type === 'thinking' && (
-                            <span className="text-muted-foreground">🧠 {progress.message || 'Processing...'}</span>
-                          )}
-                          {progress.type === 'tools-starting' && (
-                            <span className="text-blue-500">🔧 Starting {progress.count} tool(s) (iteration {progress.iteration})</span>
-                          )}
-                          {progress.type === 'executing' && (
-                            <span className="text-yellow-500">⚡ {progress.tool}({Object.entries(progress.args || {}).map(([k,v]) => `${k}="${String(v).slice(0,30)}"`).join(', ')})</span>
-                          )}
-                          {progress.type === 'completed' && (
-                            <span className={progress.success ? 'text-green-500' : 'text-red-500'}>
-                              {progress.success ? '✓' : '✗'} {progress.tool}: {progress.preview?.slice(0, 100)}...
-                            </span>
-                          )}
+                  {/* Tool progress - collapsible activity log */}
+                  {toolProgress.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-blue-500/20">
+                      <details open className="text-xs">
+                        <summary className="cursor-pointer text-blue-400 font-medium mb-1">
+                          Tool Activity ({toolProgress.length} events)
+                        </summary>
+                        <div className="space-y-1 mt-1 max-h-40 overflow-y-auto font-mono">
+                          {toolProgress.map((progress, idx) => (
+                            <div key={idx} className="flex items-start gap-2">
+                              {progress.type === 'thinking' && (
+                                <span className="text-purple-400">🧠 {progress.message || 'Processing...'}</span>
+                              )}
+                              {progress.type === 'tools-starting' && (
+                                <span className="text-blue-400">🔧 Starting {progress.count} tool(s)</span>
+                              )}
+                              {progress.type === 'executing' && (
+                                <span className="text-yellow-400">
+                                  <span className="animate-pulse">⚡</span> {progress.tool}
+                                  <span className="text-muted-foreground ml-1">
+                                    ({Object.entries(progress.args || {}).map(([k,v]) => `${k}="${String(v).slice(0,20)}${String(v).length > 20 ? '...' : ''}"`).join(', ')})
+                                  </span>
+                                </span>
+                              )}
+                              {progress.type === 'completed' && (
+                                <span className={progress.success ? 'text-green-400' : 'text-red-400'}>
+                                  {progress.success ? '✓' : '✗'} {progress.tool}
+                                  <span className="text-muted-foreground ml-1 text-[10px]">
+                                    {progress.preview?.slice(0, 60)}...
+                                  </span>
+                                </span>
+                              )}
+                            </div>
+                          ))}
                         </div>
-                      ))}
+                      </details>
                     </div>
-                  ) : (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  )}
+
+                  {/* Fallback spinner when no content yet */}
+                  {!streamingContent && toolProgress.length === 0 && (
+                    <div className="flex items-center gap-2 text-sm text-blue-400">
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      <span className="font-mono">Thinking...</span>
+                      <span>Initializing...</span>
                     </div>
                   )}
                 </div>

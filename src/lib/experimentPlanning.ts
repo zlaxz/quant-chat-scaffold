@@ -1,20 +1,7 @@
 // Experiment planning helpers for Experiment Director mode
 
 import type { BacktestRun, BacktestParams, BacktestMetrics } from '@/types/backtest';
-
-interface MemoryNote {
-  id: string;
-  workspace_id: string;
-  content: string;
-  source: string;
-  tags: string[];
-  created_at: string;
-  run_id: string | null;
-  metadata: Record<string, any>;
-  memory_type: string;
-  importance: string;
-  archived: boolean;
-}
+import type { MemoryNote } from '@/types/memory';
 
 /**
  * Build a summary of recent backtest runs for experiment planning

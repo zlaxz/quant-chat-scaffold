@@ -5,18 +5,9 @@
  */
 
 import type { BacktestRun } from '@/types/backtest';
+import type { MemoryNote } from '@/types/memory';
 
-export interface MemoryNote {
-  id: string;
-  content: string;
-  memory_type: string;
-  importance: string;
-  tags: string[];
-  source: string;
-  run_id?: string;
-  created_at: string;
-  archived?: boolean;
-}
+export type { MemoryNote };
 
 /**
  * Build risk-focused run summary

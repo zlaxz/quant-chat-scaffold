@@ -6,17 +6,9 @@
  */
 
 import type { BacktestRun } from '@/types/backtest';
+import type { MemoryNote } from '@/types/memory';
 
-export interface MemoryNote {
-  id: string;
-  content: string;
-  memory_type: string | null;
-  importance: string | null;
-  tags: string[] | null;
-  run_id: string | null;
-  created_at: string | null;
-  source: string;
-}
+export type { MemoryNote };
 
 /**
  * Build a concise summary of a backtest run

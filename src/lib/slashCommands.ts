@@ -1279,11 +1279,9 @@ async function handleAutoAnalyze(args: string, context: CommandContext): Promise
     const finalPrompt = buildAutoAnalyzePrompt(scope, synthesisInput);
 
     // Call PRIMARY chat for final synthesis (high-stakes reasoning) via electronClient
-    const { content: finalContent } = await chatPrimary({
-      sessionId: context.sessionId,
-      workspaceId: context.workspaceId,
-      content: finalPrompt
-    });
+    const { content: finalContent } = await chatPrimary([
+      { role: 'user', content: finalPrompt }
+    ]);
 
     // Return comprehensive report with save tip
     const scopeNote = scope ? ` (scope: ${scope})` : '';
