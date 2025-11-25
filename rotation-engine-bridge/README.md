@@ -2,7 +2,7 @@
 
 HTTP bridge that:
 1. Executes Python backtests from Chief Quant chat
-2. Ingests Massive.com (Polygon.io) market data to local 8TB drive
+2. Ingests Massive.com (Polygon.io) market data to VelocityData drive
 3. Maintains local data index in Supabase for fast queries
 
 ## Setup (One Time)
@@ -77,8 +77,8 @@ The bridge includes a data ingestor for downloading Polygon.io flat files from M
    # For WebSocket streaming (Polygon real-time)
    export POLYGON_API_KEY=your_polygon_api_key
 
-   # Local storage
-   export DATA_DIR=/path/to/8tb/drive/market_data
+   # Local storage (VelocityData external drive)
+   export DATA_DIR=/Volumes/VelocityData/market_data
 
    # Supabase
    export SUPABASE_URL=your_supabase_url
@@ -95,6 +95,9 @@ The bridge includes a data ingestor for downloading Polygon.io flat files from M
 
    # Polygon.io WebSocket (for real-time streaming)
    export POLYGON_API_KEY="r8ttfG0r9lvunoLbhpECXNjp7sRqE8LP"
+
+   # Local storage (VelocityData external drive)
+   export DATA_DIR="/Volumes/VelocityData/market_data"
    ```
 
 ### Direct Usage
@@ -172,7 +175,7 @@ python research_daemon.py \
 
 3. **Execution Engine** (`execute_candidates`)
    - Runs 4 parallel backtests (M4 Pro optimized)
-   - Uses local Parquet data from 8TB drive
+   - Uses local Parquet data from VelocityData drive
    - Calculates fitness = Sharpe × Sortino × Convexity
    - Promotes/fails strategies based on threshold
 
