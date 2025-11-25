@@ -297,7 +297,7 @@ export class RecallEngine {
           if (Array.isArray(r.symbols)) {
             symbols = r.symbols;
           } else if (typeof r.symbols === 'string') {
-            symbols = safeJSONParse<string[]>(r.symbols, null);
+            symbols = safeJSONParse<string[]>(r.symbols, []);
           }
         }
 
