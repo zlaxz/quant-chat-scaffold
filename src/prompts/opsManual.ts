@@ -232,19 +232,27 @@ export SUPABASE_KEY="your_supabase_service_role_key"
 
 **This Rig:**
 - **CPU:** Apple M4 Pro (12 cores)
-- **RAM:** 48GB unified memory
+- **GPU:** Apple M4 Pro (20 cores) - Metal/MLX compatible
+- **RAM:** 48GB unified memory (shared CPU/GPU)
 - **Storage:** 8TB VelocityData external SSD
 - **Network:** Home broadband (not datacenter)
 
 **Implications:**
-- Can run 4 parallel backtests comfortably
-- Cannot run GPU-accelerated ML (no CUDA)
+- Can run 4-6 parallel backtests comfortably
+- CAN run GPU-accelerated ML via Metal/MLX (PyTorch MPS backend)
+- Cannot use CUDA libraries (no NVIDIA GPU)
 - Cannot store full market history (selective coverage only)
 - Cannot compete on latency (this is research, not HFT)
 - Large data downloads should be scheduled overnight
 
+**GPU Capabilities (MLX/Metal):**
+- Local LLM inference (llama.cpp, MLX)
+- PyTorch with MPS backend (\`device="mps"\`)
+- Vectorized numpy/polars operations
+- Small-to-medium neural network training
+
 **Do NOT suggest:**
-- Cloud GPU instances for training
+- CUDA-specific libraries (use Metal equivalents)
 - Real-time HFT strategies
 - Storing 50TB of tick data
 - Running 100 parallel backtests
