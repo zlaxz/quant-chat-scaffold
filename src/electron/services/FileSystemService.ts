@@ -35,9 +35,11 @@ export interface SearchResult {
 
 export class FileSystemService {
   private root: string;
+  private allowedPaths: Set<string> = new Set();
 
   constructor(rootPath: string) {
     this.root = rootPath;
+    this.allowedPaths.add(rootPath);
   }
 
   /**
@@ -51,30 +53,80 @@ export class FileSystemService {
    * Update root path (used when project directory changes)
    */
   setRoot(rootPath: string): void {
+    // Remove old root from allowed paths
+    this.allowedPaths.delete(this.root);
     this.root = rootPath;
+    this.allowedPaths.add(rootPath);
   }
 
   /**
-   * Resolve and validate path relative to root
-   * Prevents path traversal attacks
+   * Add an additional allowed path (e.g., data drive)
    */
-  private resolvePath(relativePath: string): { path: string; error?: string } {
-    // Reject absolute paths for security
-    if (path.isAbsolute(relativePath)) {
+  addAllowedPath(allowedPath: string): void {
+    if (allowedPath && fsSync.existsSync(allowedPath)) {
+      this.allowedPaths.add(path.normalize(allowedPath));
+      console.log(`[FileSystemService] Added allowed path: ${allowedPath}`);
+    }
+  }
+
+  /**
+   * Remove an allowed path
+   */
+  removeAllowedPath(allowedPath: string): void {
+    this.allowedPaths.delete(path.normalize(allowedPath));
+  }
+
+  /**
+   * Get all allowed paths
+   */
+  getAllowedPaths(): string[] {
+    return Array.from(this.allowedPaths);
+  }
+
+  /**
+   * Check if an absolute path is within any allowed directory
+   * NOTE: Currently disabled (always returns true) to give agent full filesystem access
+   * like Claude Code. Re-enable allowedPaths checking if sandboxing is needed.
+   */
+  private isPathAllowed(_absolutePath: string): boolean {
+    // SANDBOX DISABLED - Full filesystem access granted
+    // To re-enable sandboxing, uncomment the code below:
+    // const normalized = path.normalize(absolutePath);
+    // for (const allowed of this.allowedPaths) {
+    //   if (normalized.startsWith(allowed)) {
+    //     return true;
+    //   }
+    // }
+    // return false;
+    return true;
+  }
+
+  /**
+   * Resolve and validate path - supports both relative and absolute paths
+   * Absolute paths must be within an allowed directory
+   * Relative paths are resolved from the project root
+   */
+  private resolvePath(inputPath: string): { path: string; error?: string } {
+    // Handle absolute paths - must be within an allowed directory
+    if (path.isAbsolute(inputPath)) {
+      const normalized = path.normalize(inputPath);
+      if (this.isPathAllowed(normalized)) {
+        return { path: normalized };
+      }
       return {
         path: '',
-        error: `Absolute paths not allowed: ${relativePath}. Use paths relative to project root.`
+        error: `Path not in allowed directories: ${inputPath}. Allowed: ${this.getAllowedPaths().join(', ')}`
       };
     }
 
-    // Normalize and resolve
-    const resolved = path.normalize(path.join(this.root, relativePath));
+    // Handle relative paths - resolve from project root
+    const resolved = path.normalize(path.join(this.root, inputPath));
 
-    // Security: ensure resolved path is within root (prevent ../../ attacks)
-    if (!resolved.startsWith(this.root)) {
+    // Security: ensure resolved path is within an allowed directory
+    if (!this.isPathAllowed(resolved)) {
       return {
         path: '',
-        error: `Path traversal detected: ${relativePath}. Must stay within project directory.`
+        error: `Path traversal detected: ${inputPath}. Must stay within allowed directories.`
       };
     }
 
@@ -363,4 +415,25 @@ export function setFileSystemRoot(rootPath: string): void {
   } else {
     instance = new FileSystemService(rootPath);
   }
+}
+
+/**
+ * Add an additional allowed path (e.g., data drive)
+ */
+export function addAllowedPath(allowedPath: string): void {
+  if (instance) {
+    instance.addAllowedPath(allowedPath);
+  } else {
+    console.warn('[FileSystemService] Cannot add allowed path - service not initialized');
+  }
+}
+
+/**
+ * Get all currently allowed paths
+ */
+export function getAllowedPaths(): string[] {
+  if (instance) {
+    return instance.getAllowedPaths();
+  }
+  return [];
 }

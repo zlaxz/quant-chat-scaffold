@@ -16,7 +16,7 @@ export interface ProtectedMemory {
   id: string;
   content: string;
   summary: string;
-  type: string;
+  memory_type: string;
   protection_level: number;
   financial_impact: number | null;
   importance: number;
@@ -53,12 +53,12 @@ export class ProtectedCanonLoader {
     }
 
     try {
-      // Query for protected memories (protection_level = 0 or type = 'lesson'/'rule')
+      // Query for protected memories (protection_level = 0 or memory_type = 'lesson'/'rule')
       const { data: memories, error } = await this.supabase
         .from('memories')
-        .select('id, content, summary, type, protection_level, financial_impact, importance')
+        .select('id, content, summary, memory_type, protection_level, financial_impact, importance')
         .eq('workspace_id', workspaceId)
-        .or('protection_level.eq.0,type.eq.lesson,type.eq.rule')
+        .or('protection_level.eq.0,memory_type.eq.lesson,memory_type.eq.rule')
         .order('importance', { ascending: false })
         .limit(50);
 
@@ -73,8 +73,8 @@ export class ProtectedCanonLoader {
       }
 
       // Separate into lessons and rules
-      const lessons = memories.filter(m => m.type === 'lesson' || m.type === 'mistake');
-      const rules = memories.filter(m => m.type === 'rule');
+      const lessons = memories.filter(m => m.memory_type === 'lesson' || m.memory_type === 'mistake');
+      const rules = memories.filter(m => m.memory_type === 'rule');
 
       // Format for context injection
       const formattedContent = this.formatCanon(lessons, rules);

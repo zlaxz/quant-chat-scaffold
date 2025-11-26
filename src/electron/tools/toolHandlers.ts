@@ -1211,15 +1211,26 @@ export async function spawnAgent(
   agentType: string,
   context?: string
 ): Promise<ToolResult> {
+  // LOUD LOGGING - This MUST appear in console if tool is actually called
+  console.log('\n' + '='.repeat(60));
+  console.log('🚀 SPAWN_AGENT ACTUALLY CALLED - NOT HALLUCINATED');
+  console.log(`   Agent Type: ${agentType}`);
+  console.log(`   Task Preview: ${task.slice(0, 100)}...`);
+  console.log(`   Timestamp: ${new Date().toISOString()}`);
+  console.log('='.repeat(60) + '\n');
+
   try {
     const deepseekClient = getDeepSeekClient();
     if (!deepseekClient) {
+      console.log('❌ DEEPSEEK CLIENT NOT AVAILABLE - NO API KEY');
       return {
         success: false,
         content: '',
         error: 'DEEPSEEK_API_KEY not configured. Go to Settings to add your API key.'
       };
     }
+
+    console.log('✅ DeepSeek client ready, calling API...');
 
     // Define agent-specific system prompts
     const agentPrompts: Record<string, string> = {
@@ -1247,6 +1258,9 @@ Explain your implementation choices.`
       : task;
 
     // Call DeepSeek API
+    const startTime = Date.now();
+    console.log('📡 Calling DeepSeek API with model: deepseek-reasoner');
+
     const completion = await deepseekClient.chat.completions.create({
       model: 'deepseek-reasoner',
       messages: [
@@ -1257,10 +1271,21 @@ Explain your implementation choices.`
       max_tokens: 4000
     });
 
+    const elapsed = Date.now() - startTime;
+    console.log(`✅ DeepSeek API returned in ${elapsed}ms`);
+    console.log(`   Usage: ${JSON.stringify(completion.usage)}`);
+
     const agentResponse = completion.choices[0].message.content || '';
 
-    // Format the response with agent type header
-    const formattedResponse = `[${agentType.toUpperCase()} AGENT RESPONSE]\n\n${agentResponse}`;
+    // Anti-hallucination: Include verifiable proof this was a real API call
+    const verificationToken = `DEEPSEEK-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const apiLatency = elapsed;
+
+    // Format the response with agent type header AND verification
+    const formattedResponse = `[${agentType.toUpperCase()} AGENT RESPONSE]
+[VERIFIED: ${verificationToken} | Latency: ${apiLatency}ms | Tokens: ${completion.usage?.total_tokens || 'unknown'}]
+
+${agentResponse}`;
 
     return {
       success: true,

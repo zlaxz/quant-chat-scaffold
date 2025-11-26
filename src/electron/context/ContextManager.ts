@@ -222,15 +222,9 @@ Be extremely concise. Use bullet points. Aim for 10-20% of original length.`
 
       summary = await this.summarizeMessages(olderMessages);
 
-      // Create a summary message to preserve context
-      const summaryMessage: Message = {
-        role: 'system',
-        content: `[CONTEXT SUMMARY - Previous conversation compressed]\n${summary}`,
-        timestamp: Date.now(),
-        extracted: true, // Mark as already processed
-      };
-
-      finalMessages = [summaryMessage, ...recentMessages];
+      // Keep only recent messages - summary will be added to system prompt
+      // (NOT as a conversation message, which would break Gemini's role ordering)
+      finalMessages = recentMessages;
     }
 
     // If still at hard limit, drop oldest non-protected content
@@ -304,13 +298,30 @@ Be extremely concise. Use bullet points. Aim for 10-20% of original length.`
       conversationHistory
     );
 
+    // Build system prompt with optional summary
+    let systemContent = `${compressed.systemPrompt}\n${compressed.retrievedMemories}`;
+
+    // Include conversation summary in system prompt if summarization occurred
+    // (NOT as a conversation message, which would break Gemini's role ordering)
+    if (compressed.summary) {
+      systemContent += `\n\n## Previous Conversation Summary\n${compressed.summary}\n`;
+    }
+
+    // Ensure conversation history starts with 'user' role (Gemini requirement)
+    // If it starts with 'assistant', drop that leading message
+    let historyForLLM = compressed.conversationHistory;
+    while (historyForLLM.length > 0 && historyForLLM[0].role !== 'user') {
+      console.log(`[ContextManager] Dropping leading ${historyForLLM[0].role} message for Gemini compatibility`);
+      historyForLLM = historyForLLM.slice(1);
+    }
+
     // Build final messages array
     const llmMessages: Array<{ role: string; content: string }> = [
       {
         role: 'system',
-        content: `${compressed.systemPrompt}\n${compressed.retrievedMemories}`
+        content: systemContent
       },
-      ...compressed.conversationHistory.map(m => ({
+      ...historyForLLM.map(m => ({
         role: m.role,
         content: m.content,
       })),

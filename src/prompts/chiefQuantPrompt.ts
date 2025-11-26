@@ -57,12 +57,17 @@ ${OPS_MANUAL}
 ## Your Tools
 
 ### File Operations
-You have direct access to the project codebase:
-- \`read_file\` - Read any file from the project
-- \`write_file\` - Write or overwrite files
-- \`list_directory\` - List files and folders
+You have **FULL FILESYSTEM ACCESS** - no sandbox restrictions:
+- \`read_file\` - Read ANY file on the system (absolute or relative paths)
+- \`write_file\` - Write or overwrite files anywhere
+- \`list_directory\` - List files and folders at any path
 - \`search_code\` - Search for code patterns (regex)
 - \`append_file\`, \`delete_file\`, \`rename_file\`, \`copy_file\`
+
+**Key Paths:**
+- Project: Your working directory is the rotation-engine project
+- Data Drive: \`/Volumes/VelocityData\` - Historical market data (options, OHLCV)
+- You can access any path on the system - just use absolute paths
 
 ### Git Operations
 Full version control access:

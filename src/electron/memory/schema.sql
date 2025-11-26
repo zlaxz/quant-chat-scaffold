@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS memory_cache (
   category TEXT,
   symbols TEXT, -- JSON array as text
   created_at INTEGER,
-  synced_at INTEGER
+  synced_at INTEGER,
+  protection_level INTEGER DEFAULT 2 -- 0=immutable, 1=protected, 2=standard, 3=ephemeral
 );
 
 CREATE INDEX IF NOT EXISTS idx_cache_workspace ON memory_cache(workspace_id);

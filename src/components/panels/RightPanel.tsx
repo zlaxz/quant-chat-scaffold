@@ -3,6 +3,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { FileText, TrendingUp, Brain } from 'lucide-react';
 import { QuantPanel } from '@/components/quant/QuantPanel';
 import { MemoryPanel } from '@/components/memory/MemoryPanel';
+import { ContextPanel } from '@/components/context/ContextPanel';
 import { useState } from 'react';
 
 export const RightPanel = () => {
@@ -33,31 +34,19 @@ export const RightPanel = () => {
         </TabsList>
       </div>
 
-      <TabsContent value="context" className="flex-1 mt-0">
+      <TabsContent value="context" className="flex-1 mt-0 overflow-hidden">
         <ScrollArea className="h-full p-4">
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-sm font-semibold font-mono mb-2">Session Context</h3>
-              <p className="text-xs text-muted-foreground">
-                Context information will appear here during chat sessions
-              </p>
-            </div>
-            <div className="p-3 bg-muted rounded-md">
-              <div className="text-xs font-mono text-muted-foreground">
-                No active context
-              </div>
-            </div>
-          </div>
+          <ContextPanel />
         </ScrollArea>
       </TabsContent>
 
-      <TabsContent value="quant" className="flex-1 mt-0">
+      <TabsContent value="quant" className="flex-1 mt-0 overflow-hidden">
         <ScrollArea className="h-full p-4">
           <QuantPanel selectedRunIdFromMemory={selectedRunId} />
         </ScrollArea>
       </TabsContent>
 
-      <TabsContent value="memory" className="flex-1 mt-0">
+      <TabsContent value="memory" className="flex-1 mt-0 overflow-hidden">
         <ScrollArea className="h-full p-4">
           <MemoryPanel onViewRun={handleViewRun} />
         </ScrollArea>

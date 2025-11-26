@@ -27,10 +27,13 @@ interface ElectronAPI {
   }>;
   
   // LLM operations
-  chatPrimary: (messages: Array<{ role: string; content: string }>) => Promise<{ content: string; provider: string; model: string }>;
+  chatPrimary: (messages: Array<{ role: string; content: string }>) => Promise<{ content: string; provider: string; model: string; cancelled?: boolean }>;
   chatSwarm: (messages: Array<{ role: string; content: string }>) => Promise<{ content: string; provider: string; model: string }>;
   chatSwarmParallel: (prompts: Array<{ agentId: string; messages: Array<{ role: string; content: string }> }>) => Promise<Array<{ agentId: string; content: string }>>;
   helperChat: (messages: Array<{ role: string; content: string }>) => Promise<{ content: string }>;
+
+  // Request cancellation (ESC key support)
+  cancelRequest: () => Promise<{ success: boolean }>;
   
   // Environment
   getRotationEngineRoot: () => Promise<string>;
@@ -152,7 +155,7 @@ interface ElectronAPI {
 
   // LLM streaming events (for real-time text streaming)
   onLLMStream: (callback: (data: {
-    type: 'chunk' | 'done' | 'error' | 'thinking';
+    type: 'chunk' | 'done' | 'error' | 'thinking' | 'cancelled' | 'clear-hallucinated';
     content?: string;
     error?: string;
     timestamp: number;

@@ -20,9 +20,135 @@ const HELPER_MODEL = MODELS.HELPER.model;
 // Max tool call iterations to prevent infinite loops
 const MAX_TOOL_ITERATIONS = 10;
 
+// List of tool names we can parse from hallucinated text
+const PARSEABLE_TOOLS = [
+  'spawn_agent',
+  'read_file',
+  'list_directory',
+  'search_code',
+  'write_file',
+  'git_status',
+  'git_diff',
+  'run_tests',
+  'run_command'
+];
+
+/**
+ * Parse hallucinated tool calls from text response
+ * Gemini sometimes generates text that looks like tool calls instead of actual functionCall parts
+ * This parser extracts those and converts them to executable tool calls
+ */
+function parseHallucinatedToolCalls(text: string): Array<{ name: string; args: Record<string, any> }> {
+  const calls: Array<{ name: string; args: Record<string, any> }> = [];
+
+  for (const toolName of PARSEABLE_TOOLS) {
+    // Pattern 1: 🔧 tool_name(arg="value", arg2="value2")
+    const emojiPattern = new RegExp(`🔧\\s*${toolName}\\s*\\(([^)]+)\\)`, 'g');
+    let match;
+    while ((match = emojiPattern.exec(text)) !== null) {
+      const argsStr = match[1];
+      const args = parseArgsString(argsStr);
+      if (Object.keys(args).length > 0) {
+        console.log(`[PARSER] Found emoji-style call: ${toolName}`, args);
+        calls.push({ name: toolName, args });
+      }
+    }
+
+    // Pattern 2: tool_name({ "key": "value" }) - JSON style
+    const jsonPattern = new RegExp(`${toolName}\\s*\\(\\s*(\\{[^}]+\\})\\s*\\)`, 'g');
+    while ((match = jsonPattern.exec(text)) !== null) {
+      try {
+        const args = JSON.parse(match[1]);
+        console.log(`[PARSER] Found JSON-style call: ${toolName}`, args);
+        calls.push({ name: toolName, args });
+      } catch {
+        // Invalid JSON, skip
+      }
+    }
+
+    // Pattern 3: **tool_name**(arg="value") - markdown bold style
+    const boldPattern = new RegExp(`\\*\\*${toolName}\\*\\*\\s*\\(([^)]+)\\)`, 'g');
+    while ((match = boldPattern.exec(text)) !== null) {
+      const argsStr = match[1];
+      const args = parseArgsString(argsStr);
+      if (Object.keys(args).length > 0) {
+        console.log(`[PARSER] Found bold-style call: ${toolName}`, args);
+        calls.push({ name: toolName, args });
+      }
+    }
+
+    // Pattern 4: `tool_name(arg="value")` - code block style
+    const codePattern = new RegExp(`\`${toolName}\\s*\\(([^)]+)\\)\``, 'g');
+    while ((match = codePattern.exec(text)) !== null) {
+      const argsStr = match[1];
+      const args = parseArgsString(argsStr);
+      if (Object.keys(args).length > 0) {
+        console.log(`[PARSER] Found code-style call: ${toolName}`, args);
+        calls.push({ name: toolName, args });
+      }
+    }
+  }
+
+  // Deduplicate calls (same tool + same args)
+  const seen = new Set<string>();
+  return calls.filter(call => {
+    const key = `${call.name}:${JSON.stringify(call.args)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * Parse argument string like: type="analyst", task="do something"
+ * or: agentType="analyst", task="do something"
+ */
+function parseArgsString(argsStr: string): Record<string, any> {
+  const args: Record<string, any> = {};
+
+  // Match key="value" or key='value' patterns
+  const pattern = /(\w+)\s*=\s*["']([^"']+)["']/g;
+  let match;
+  while ((match = pattern.exec(argsStr)) !== null) {
+    const key = match[1];
+    const value = match[2];
+
+    // Map common variations to expected arg names
+    if (key === 'type' || key === 'agentType' || key === 'agent_type') {
+      args['agentType'] = value;
+    } else {
+      args[key] = value;
+    }
+  }
+
+  return args;
+}
+
 // Retry configuration
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
+
+// Cancellation state for request interruption
+let currentRequestCancelled = false;
+
+// Export cancellation function for use in handlers
+export function cancelCurrentRequest() {
+  currentRequestCancelled = true;
+  console.log('[LLM] Request cancellation requested');
+}
+
+// Check if request is cancelled (resets the flag after checking)
+function checkCancelled(): boolean {
+  if (currentRequestCancelled) {
+    return true;
+  }
+  return false;
+}
+
+// Reset cancellation state at start of new request
+function resetCancellation() {
+  currentRequestCancelled = false;
+}
 
 // Retry helper with exponential backoff
 async function withRetry<T>(
@@ -98,8 +224,17 @@ function toolsToOpenAIFormat(): OpenAI.Chat.Completions.ChatCompletionTool[] {
 }
 
 export function registerLlmHandlers() {
+  // Cancel request handler
+  ipcMain.handle('cancel-request', async () => {
+    cancelCurrentRequest();
+    return { success: true };
+  });
+
   // Primary tier (Gemini) with tool calling - DIRECT API CALL
   ipcMain.handle('chat-primary', async (_event, messagesRaw: unknown) => {
+    // Reset cancellation state at start of new request
+    resetCancellation();
+
     try {
       // Validate messages at IPC boundary
       const messages = validateIPC(ChatMessagesSchema, messagesRaw, 'chat messages');
@@ -127,11 +262,21 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
 
       const fullSystemInstruction = (systemMessage?.content || '') + toolDirective;
 
-      // Get model with tools enabled and system instruction
+      // Get model with tools enabled, explicit toolConfig, and system instruction
+      // Setting toolConfig explicitly to encourage function calling over text generation
+      // See: https://ai.google.dev/gemini-api/docs/function-calling#function-calling-modes
       const model = geminiClient.getGenerativeModel({
         model: PRIMARY_MODEL,
         tools: [{ functionDeclarations: ALL_TOOLS }],
+        toolConfig: {
+          functionCallingConfig: {
+            mode: 'ANY' as any, // ANY forces function calling - model MUST call a function
+          }
+        },
         systemInstruction: fullSystemInstruction,
+        generationConfig: {
+          temperature: 0.3, // Lower temperature for more deterministic tool calling
+        },
       });
 
       // Convert messages to Gemini format (excluding system messages)
@@ -183,8 +328,45 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
       let toolCallLog: string[] = []; // Visible log for user
 
       while (iterations < MAX_TOOL_ITERATIONS) {
+        // Check for cancellation at start of each iteration
+        if (checkCancelled()) {
+          console.log('[LLM] Request cancelled by user');
+          _event.sender.send('llm-stream', {
+            type: 'cancelled',
+            content: '\n\n*Request cancelled by user.*',
+            timestamp: Date.now()
+          });
+          return {
+            content: '*Request cancelled by user.*',
+            provider: PRIMARY_PROVIDER,
+            model: PRIMARY_MODEL,
+            toolsUsed: iterations,
+            cancelled: true
+          };
+        }
+
         const candidate = (response as any).candidates?.[0];
         if (!candidate) break;
+
+        // DEBUG: Log exactly what Gemini returned
+        const allParts = candidate.content?.parts || [];
+        console.log('\n' + '='.repeat(60));
+        console.log('[DEBUG] GEMINI RESPONSE ANALYSIS');
+        console.log('  Total parts:', allParts.length);
+        allParts.forEach((part: any, i: number) => {
+          const hasText = !!part.text;
+          const hasFunctionCall = !!part.functionCall;
+          console.log(`  Part ${i}: text=${hasText}, functionCall=${hasFunctionCall}`);
+          if (hasFunctionCall) {
+            console.log(`    → REAL TOOL CALL: ${part.functionCall.name}`);
+            console.log(`    → Args: ${JSON.stringify(part.functionCall.args)}`);
+          }
+          if (hasText && part.text.includes('spawn_agent')) {
+            console.log('    ⚠️  TEXT CONTAINS "spawn_agent" - HALLUCINATION DETECTED');
+            console.log(`    → Text preview: ${part.text.slice(0, 200)}...`);
+          }
+        });
+        console.log('='.repeat(60) + '\n');
 
         // Check if model wants to call tools
         const functionCalls = candidate.content?.parts?.filter(
@@ -192,7 +374,99 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
         );
 
         if (!functionCalls || functionCalls.length === 0) {
-          // No more tool calls, we have the final response
+          // Check for hallucinated tool calls in text response
+          const textParts = allParts.filter((p: any) => p.text);
+          const fullText = textParts.map((p: any) => p.text).join('');
+
+          // Parse hallucinated tool calls from text
+          const hallucinatedCalls = parseHallucinatedToolCalls(fullText);
+
+          if (hallucinatedCalls.length > 0) {
+            console.log(`[FALLBACK] Detected ${hallucinatedCalls.length} hallucinated tool calls in text - EXECUTING THEM`);
+
+            // CRITICAL: Clear the hallucinated response from the UI before showing real results
+            // Gemini streamed fake tool calls AND fake results - we need to discard them
+            _event.sender.send('llm-stream', {
+              type: 'clear-hallucinated',
+              content: `*Detected hallucinated response - executing ${hallucinatedCalls.length} real tool calls and waiting for actual results...*\n\n`,
+              timestamp: Date.now()
+            });
+
+            // Execute hallucinated calls
+            _event.sender.send('tool-progress', {
+              type: 'tools-starting',
+              count: hallucinatedCalls.length,
+              iteration: iterations + 1,
+              message: 'Executing real tool calls (replacing hallucinated response)',
+              timestamp: Date.now()
+            });
+
+            const toolResults: Array<{
+              functionResponse: {
+                name: string;
+                response: { content: string };
+              };
+            }> = [];
+
+            for (const hCall of hallucinatedCalls) {
+              console.log(`[FALLBACK] Executing hallucinated: ${hCall.name}`, hCall.args);
+
+              _event.sender.send('tool-progress', {
+                type: 'executing',
+                tool: hCall.name,
+                args: hCall.args,
+                iteration: iterations + 1,
+                timestamp: Date.now()
+              });
+
+              try {
+                const result = await executeTool(hCall.name, hCall.args);
+                const output = result.success ? result.content : `Error: ${result.error}`;
+
+                _event.sender.send('tool-progress', {
+                  type: 'completed',
+                  tool: hCall.name,
+                  success: result.success,
+                  preview: output.slice(0, 300),
+                  iteration: iterations + 1,
+                  timestamp: Date.now()
+                });
+
+                toolResults.push({
+                  functionResponse: {
+                    name: hCall.name,
+                    response: { content: output }
+                  }
+                });
+
+                allToolOutputs.push(`[${hCall.name}]: ${output.slice(0, 500)}${output.length > 500 ? '...' : ''}`);
+              } catch (error) {
+                const errorMsg = error instanceof Error ? error.message : String(error);
+                console.log(`[FALLBACK] Tool error: ${errorMsg}`);
+                toolResults.push({
+                  functionResponse: {
+                    name: hCall.name,
+                    response: { content: `Tool execution error: ${errorMsg}` }
+                  }
+                });
+              }
+            }
+
+            // Send results back to model
+            if (toolResults.length > 0) {
+              _event.sender.send('llm-stream', {
+                type: 'thinking',
+                content: `\n\n*Analyzing tool results (iteration ${iterations + 1}, fallback execution)...*\n\n`,
+                timestamp: Date.now()
+              });
+              response = await streamMessage(toolResults);
+              iterations++;
+              continue; // Continue the loop to process new response
+            }
+          }
+
+          // No more tool calls (real or hallucinated), we have the final response
+          console.log('[DEBUG] No functionCall parts found - Gemini returned text only');
           break;
         }
 
@@ -215,6 +489,23 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
         }> = [];
 
         for (const part of functionCalls) {
+          // Check for cancellation before each tool
+          if (checkCancelled()) {
+            console.log('[LLM] Request cancelled during tool execution');
+            _event.sender.send('llm-stream', {
+              type: 'cancelled',
+              content: '\n\n*Request cancelled by user during tool execution.*',
+              timestamp: Date.now()
+            });
+            return {
+              content: '*Request cancelled by user.*',
+              provider: PRIMARY_PROVIDER,
+              model: PRIMARY_MODEL,
+              toolsUsed: iterations,
+              cancelled: true
+            };
+          }
+
           const call = (part as any).functionCall;
           const toolName = call.name;
           const toolArgs = call.args || {};

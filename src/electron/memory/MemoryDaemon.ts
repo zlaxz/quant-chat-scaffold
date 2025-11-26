@@ -274,6 +274,9 @@ export class MemoryDaemon extends EventEmitter {
       }))
     );
 
+    // Valid memory types per Supabase constraint
+    const validTypes = ['observation', 'lesson', 'rule', 'strategy', 'mistake', 'success'];
+
     const supabaseRecords = memoriesWithEmbeddings
       .filter((m) => m.embedding !== null)
       .map((m) => ({
@@ -281,7 +284,7 @@ export class MemoryDaemon extends EventEmitter {
         session_id: sessionId,
         content: m.content,
         summary: m.summary,
-        memory_type: m.type,
+        memory_type: validTypes.includes(m.type) ? m.type : 'observation',
         category: m.category || null,
         symbols: m.symbols || null,
         strategies: m.strategies || null,

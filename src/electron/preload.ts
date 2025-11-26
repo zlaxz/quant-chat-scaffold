@@ -24,6 +24,9 @@ contextBridge.exposeInMainWorld('electron', {
   chatSwarmParallel: (prompts: Array<{ agentId: string; messages: Array<{ role: string; content: string }> }>) => ipcRenderer.invoke('chat-swarm-parallel', prompts),
   helperChat: (messages: Array<{ role: string; content: string }>) => ipcRenderer.invoke('helper-chat', messages),
 
+  // Request cancellation (ESC key support)
+  cancelRequest: () => ipcRenderer.invoke('cancel-request'),
+
   // Environment
   getRotationEngineRoot: () => ipcRenderer.invoke('get-rotation-engine-root'),
   
@@ -87,7 +90,7 @@ contextBridge.exposeInMainWorld('electron', {
 
   // LLM streaming events (for real-time text streaming)
   onLLMStream: (callback: (data: {
-    type: 'chunk' | 'done' | 'error' | 'thinking';
+    type: 'chunk' | 'done' | 'error' | 'thinking' | 'cancelled';
     content?: string;
     error?: string;
     timestamp: number;

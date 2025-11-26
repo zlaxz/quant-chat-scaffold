@@ -166,6 +166,17 @@ export const ChatArea = () => {
       } else if (data.type === 'error') {
         setIsStreaming(false);
         setStreamingContent('');
+      } else if (data.type === 'cancelled') {
+        // Request was cancelled by user
+        setIsStreaming(false);
+        setStreamingContent('');
+        setToolProgress([]);
+      } else if (data.type === 'clear-hallucinated') {
+        // Gemini hallucinated tool calls - clear fake response and show notification
+        // This happens when Gemini returns text instead of functionCall parts
+        console.log('[ChatArea] Clearing hallucinated response, executing real tools...');
+        setStreamingContent(data.content || '*Executing real tool calls...*\n\n');
+        setIsStreaming(true);
       }
     });
 
@@ -174,6 +185,39 @@ export const ChatArea = () => {
       unsubscribeStream();
     };
   }, []);
+
+  // ESC key handler for cancelling requests
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && isLoading) {
+        e.preventDefault();
+        console.log('[ChatArea] ESC pressed - cancelling request');
+
+        // Call cancel request if in Electron
+        if (window.electron?.cancelRequest) {
+          window.electron.cancelRequest().then(() => {
+            toast({
+              title: 'Request Cancelled',
+              description: 'The agent was stopped by ESC key',
+            });
+            setIsLoading(false);
+            setStreamingContent('');
+            setToolProgress([]);
+          }).catch((err: Error) => {
+            console.error('[ChatArea] Cancel request failed:', err);
+          });
+        } else {
+          // Browser mode - just reset loading state
+          setIsLoading(false);
+          setStreamingContent('');
+          setToolProgress([]);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isLoading, toast]);
 
   // Load messages when session changes
   useEffect(() => {
@@ -868,10 +912,10 @@ export const ChatArea = () => {
           </Button>
         </div>
         <div className="mt-2 text-xs text-muted-foreground font-mono">
-          {isLoading 
-            ? 'Processing...' 
-            : inputValue.startsWith('/') 
-            ? '🎮 Slash command mode - Press Enter to execute' 
+          {isLoading
+            ? '⏳ Processing... (Press ESC to cancel)'
+            : inputValue.startsWith('/')
+            ? '🎮 Slash command mode - Press Enter to execute'
             : 'Type /help for available commands'}
         </div>
       </div>

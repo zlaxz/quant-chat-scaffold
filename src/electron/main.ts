@@ -12,7 +12,7 @@ import { registerLlmHandlers } from './ipc-handlers/llmClient';
 import { registerMemoryHandlers, setMemoryServices, registerAnalysisHandlers } from './ipc-handlers/memoryHandlers';
 import { registerDaemonHandlers, stopDaemonOnExit } from './ipc-handlers/daemonManager';
 import { registerContextHandlers } from './ipc-handlers/contextHandlers';
-import { setFileSystemRoot } from './services/FileSystemService';
+import { setFileSystemRoot, addAllowedPath } from './services/FileSystemService';
 import { MemoryDaemon } from './memory/MemoryDaemon';
 import { RecallEngine } from './memory/RecallEngine';
 import { OverfittingDetector } from './analysis/overfittingDetector';
@@ -77,6 +77,16 @@ app.whenReady().then(() => {
     process.env.ROTATION_ENGINE_ROOT = savedDirectory;
     // Initialize FileSystemService with root path
     setFileSystemRoot(savedDirectory);
+  }
+
+  // Add data drive to allowed paths for agent access
+  const savedDataDrive = store.get('infra.dataDrivePath');
+  const dataDrivePath = savedDataDrive || '/Volumes/VelocityData';
+  if (fs.existsSync(dataDrivePath)) {
+    addAllowedPath(dataDrivePath);
+    console.log(`[Main] Added data drive to allowed paths: ${dataDrivePath}`);
+  } else {
+    console.log(`[Main] Data drive not found: ${dataDrivePath} (will add when available)`);
   }
 
   // Initialize API keys from store
@@ -192,7 +202,14 @@ app.whenReady().then(() => {
       process.env.POLYGON_API_KEY = config.polygonApiKey;
       process.env.AWS_SECRET_ACCESS_KEY = config.polygonApiKey;
     }
-    if (config.dataDrivePath) process.env.DATA_DIR = config.dataDrivePath;
+    if (config.dataDrivePath) {
+      process.env.DATA_DIR = config.dataDrivePath;
+      // Add to allowed paths for agent file access
+      if (fs.existsSync(config.dataDrivePath)) {
+        addAllowedPath(config.dataDrivePath);
+        console.log(`[Main] Added data drive to allowed paths: ${config.dataDrivePath}`);
+      }
+    }
 
     return { success: true };
   });
@@ -264,10 +281,11 @@ app.whenReady().then(() => {
   const memoryDbPath = path.join(app.getPath('userData'), 'memory.db');
   localDb = new Database(memoryDbPath);
 
-  const supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_ANON_KEY!
-  );
+  // Supabase public credentials (anon key is safe to embed)
+  const SUPABASE_URL = 'https://ynaqtawyynqikfyranda.supabase.co';
+  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InluYXF0YXd5eW5xaWtmeXJhbmRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM1NzM5NjMsImV4cCI6MjA3OTE0OTk2M30.VegcJvLluy8toSYqnR7Ufc5jx5XAl1-XeDRl8KbsIIw';
+
+  const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
   const recallEngine = new RecallEngine(localDb, supabase);
   memoryDaemon = new MemoryDaemon(localDb, supabase, {
@@ -299,7 +317,7 @@ app.whenReady().then(() => {
   registerMemoryHandlers();
 
   // Register context management handlers
-  registerContextHandlers();
+  registerContextHandlers(supabase);
 
   // Register analysis handlers
   registerAnalysisHandlers(
