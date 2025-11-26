@@ -239,7 +239,7 @@ export const ChatSessionList = () => {
                   <TooltipTrigger asChild>
                     <div
                       className={cn(
-                        'rounded-md transition-colors mb-1 flex items-center gap-1',
+                        'rounded-md transition-colors mb-1 flex items-center gap-1 w-full overflow-hidden',
                         'hover:bg-muted/50',
                         selectedSessionId === session.id && 'bg-muted',
                         isCollapsed ? 'p-2 justify-center' : 'p-1.5'
@@ -260,10 +260,10 @@ export const ChatSessionList = () => {
                         <>
                           <button
                             onClick={() => setSelectedSession(session.id, session.workspace_id)}
-                            className="flex items-center gap-1.5 text-left min-w-0 flex-1 overflow-hidden"
+                            className="flex items-center gap-1.5 text-left overflow-hidden flex-1 min-w-0"
                           >
                             <MessageSquare className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                            <div className="min-w-0 flex-1">
+                            <div className="overflow-hidden flex-1 min-w-0">
                               <div className="font-medium text-xs truncate">
                                 {session.title}
                               </div>
@@ -273,7 +273,7 @@ export const ChatSessionList = () => {
                             </div>
                           </button>
                           
-                          <div className="flex items-center gap-0.5 shrink-0">
+                          <div className="flex items-center gap-0.5 shrink-0 ml-1">
                             <Button
                               variant="ghost"
                               size="icon"
