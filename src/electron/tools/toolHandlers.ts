@@ -14,6 +14,19 @@ import * as FileOps from './fileOperations';
 const execAsync = promisify(exec);
 const fsPromises = fs.promises;
 
+// Safe logging that won't crash on EPIPE (broken pipe)
+function safeLog(...args: any[]): void {
+  try {
+    console.log(...args);
+  } catch (e: any) {
+    // Silently ignore EPIPE errors - happens when stdout closed
+    if (e.code !== 'EPIPE' && e.message !== 'write EPIPE') {
+      // Re-throw non-EPIPE errors
+      throw e;
+    }
+  }
+}
+
 // Tool execution timeout (30 seconds)
 const TOOL_TIMEOUT_MS = 30000;
 
@@ -108,6 +121,36 @@ export async function appendFile(filePath: string, content: string): Promise<Too
 
 export async function deleteFile(filePath: string): Promise<ToolResult> {
   return FileOps.deleteFile(filePath);
+}
+
+// ==================== COMMAND EXECUTION ====================
+
+/**
+ * Execute a shell command (for agent use)
+ * Security: Commands run in the engine root directory
+ */
+export async function runCommand(command: string): Promise<ToolResult> {
+  try {
+    const root = getEngineRoot();
+    safeLog(`[runCommand] Executing: ${command.slice(0, 100)}${command.length > 100 ? '...' : ''}`);
+
+    const { stdout, stderr } = await execWithTimeout(command, {
+      cwd: root,
+      timeout: 60000 // 60 second timeout for commands
+    });
+
+    const output = stdout + (stderr ? `\n[stderr]: ${stderr}` : '');
+    return {
+      success: true,
+      content: output || 'Command completed with no output'
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      content: '',
+      error: `Command failed: ${error.message || error.stderr || String(error)}`
+    };
+  }
 }
 
 // ==================== GIT OPERATIONS ====================
@@ -1206,23 +1249,144 @@ function getDeepSeekClient(): OpenAI | null {
   return new OpenAI({ apiKey, baseURL: 'https://api.deepseek.com' });
 }
 
+// OpenAI-compatible tool definitions for agent use
+const AGENT_TOOLS: OpenAI.Chat.ChatCompletionTool[] = [
+  {
+    type: 'function',
+    function: {
+      name: 'read_file',
+      description: 'Read the contents of a file. Use this to examine code, configuration, or data files.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Path to the file to read (relative to project root)' }
+        },
+        required: ['path']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'list_directory',
+      description: 'List contents of a directory to explore the codebase structure.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Path to directory (relative to project root, use "." for root)' }
+        },
+        required: ['path']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'search_code',
+      description: 'Search for patterns in code files using grep-like functionality.',
+      parameters: {
+        type: 'object',
+        properties: {
+          pattern: { type: 'string', description: 'Search pattern (supports regex)' },
+          path: { type: 'string', description: 'Directory to search in (optional, defaults to project root)' },
+          file_pattern: { type: 'string', description: 'File glob pattern like "*.py" or "*.ts" (optional)' }
+        },
+        required: ['pattern']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'write_file',
+      description: 'Write content to a file. Creates the file if it does not exist.',
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Path to write to (relative to project root)' },
+          content: { type: 'string', description: 'Content to write to the file' }
+        },
+        required: ['path', 'content']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'run_command',
+      description: 'Execute a shell command. Use for running tests, scripts, or other CLI operations.',
+      parameters: {
+        type: 'object',
+        properties: {
+          command: { type: 'string', description: 'The shell command to execute' }
+        },
+        required: ['command']
+      }
+    }
+  }
+];
+
+// Execute a tool call from the agent
+async function executeAgentTool(toolName: string, args: Record<string, any>): Promise<string> {
+  safeLog(`   [Agent Tool] ${toolName}`, JSON.stringify(args).slice(0, 100));
+
+  try {
+    let result: ToolResult;
+
+    switch (toolName) {
+      case 'read_file':
+        result = await readFile(args.path);
+        break;
+      case 'list_directory':
+        result = await listDirectory(args.path);
+        break;
+      case 'search_code':
+        result = await searchCode(args.pattern, args.path, args.file_pattern);
+        break;
+      case 'write_file':
+        result = await writeFile(args.path, args.content);
+        break;
+      case 'run_command':
+        result = await runCommand(args.command);
+        break;
+      default:
+        return `Unknown tool: ${toolName}`;
+    }
+
+    if (result.success) {
+      // Truncate very long outputs to prevent context overflow
+      const content = result.content;
+      if (content.length > 15000) {
+        return content.slice(0, 15000) + '\n\n[Output truncated - showing first 15000 chars]';
+      }
+      return content;
+    } else {
+      return `Error: ${result.error || 'Unknown error'}`;
+    }
+  } catch (error: any) {
+    return `Tool execution error: ${error.message}`;
+  }
+}
+
 export async function spawnAgent(
   task: string,
   agentType: string,
   context?: string
 ): Promise<ToolResult> {
-  // LOUD LOGGING - This MUST appear in console if tool is actually called
-  console.log('\n' + '='.repeat(60));
-  console.log('🚀 SPAWN_AGENT ACTUALLY CALLED - NOT HALLUCINATED');
-  console.log(`   Agent Type: ${agentType}`);
-  console.log(`   Task Preview: ${task.slice(0, 100)}...`);
-  console.log(`   Timestamp: ${new Date().toISOString()}`);
-  console.log('='.repeat(60) + '\n');
+  const startTime = Date.now();
+
+  // LOUD LOGGING
+  safeLog('\n' + '='.repeat(60));
+  safeLog('🚀 SPAWN_AGENT WITH TOOL CALLING');
+  safeLog(`   Agent Type: ${agentType}`);
+  safeLog(`   Task Preview: ${task.slice(0, 100)}...`);
+  safeLog(`   Timestamp: ${new Date().toISOString()}`);
+  safeLog('='.repeat(60));
 
   try {
     const deepseekClient = getDeepSeekClient();
     if (!deepseekClient) {
-      console.log('❌ DEEPSEEK CLIENT NOT AVAILABLE - NO API KEY');
+      safeLog('❌ DEEPSEEK CLIENT NOT AVAILABLE - NO API KEY');
       return {
         success: false,
         content: '',
@@ -1230,68 +1394,131 @@ export async function spawnAgent(
       };
     }
 
-    console.log('✅ DeepSeek client ready, calling API...');
-
-    // Define agent-specific system prompts
+    // Agent-specific system prompts with tool instructions
     const agentPrompts: Record<string, string> = {
-      analyst: `You are a data analyst agent specializing in quantitative analysis and strategy evaluation.
-Analyze the provided data/code and provide clear, actionable insights.
-Focus on metrics, patterns, and statistical significance.
-Be specific with numbers and concrete recommendations.`,
-      reviewer: `You are a code reviewer agent specializing in Python, TypeScript, and quantitative trading systems.
-Review the code for bugs, logic errors, performance issues, and best practices.
-Be specific and actionable in your feedback.
-Highlight both issues and good patterns you observe.`,
-      researcher: `You are a research agent specializing in gathering and synthesizing information.
-Research the given topic thoroughly and provide comprehensive analysis.
-Cite sources when possible and distinguish between facts and opinions.
-Organize findings clearly with key takeaways.`,
-      coder: `You are a coding agent specializing in Python and TypeScript development.
-Implement the requested functionality with clean, well-documented code.
-Follow best practices and include error handling.
-Explain your implementation choices.`
+      analyst: `You are a data analyst agent with FULL TOOL ACCESS.
+You can read files, list directories, search code, write files, and run commands.
+USE YOUR TOOLS to gather the information you need before providing analysis.
+Do not ask for file contents - read them yourself using read_file.
+Be thorough: explore the codebase, read relevant files, then provide specific, data-backed analysis.`,
+      reviewer: `You are a code reviewer agent with FULL TOOL ACCESS.
+You can read files, list directories, search code, and run tests.
+USE YOUR TOOLS to read the actual code before reviewing.
+Do not rely on context passed to you - read the files yourself for accuracy.
+Be specific: cite line numbers, show code snippets, suggest concrete fixes.`,
+      researcher: `You are a research agent with FULL TOOL ACCESS.
+You can explore the codebase, read files, search for patterns, and run commands.
+USE YOUR TOOLS to investigate thoroughly before drawing conclusions.
+Provide comprehensive analysis with specific evidence from the code.`,
+      coder: `You are a coding agent with FULL TOOL ACCESS.
+You can read existing code, write new code, and run tests to verify your work.
+USE YOUR TOOLS: read existing files to understand patterns, write your code, then test it.
+Follow the coding style you observe in the codebase. Include error handling.`
     };
 
     const systemPrompt = agentPrompts[agentType.toLowerCase()] || agentPrompts.analyst;
-    const userMessage = context
-      ? `${task}\n\n## Context:\n${context}`
-      : task;
+    const userMessage = context ? `${task}\n\n## Initial Context:\n${context}` : task;
 
-    // Call DeepSeek API
-    const startTime = Date.now();
-    console.log('📡 Calling DeepSeek API with model: deepseek-reasoner');
+    // Initialize conversation
+    const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: userMessage }
+    ];
 
-    const completion = await deepseekClient.chat.completions.create({
-      model: 'deepseek-reasoner',
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage }
-      ],
-      temperature: 0.7,
-      max_tokens: 4000
-    });
+    // Agentic loop - iterate until model gives final answer (no more tool calls)
+    const MAX_ITERATIONS = 15;
+    let iterations = 0;
+    let totalTokens = 0;
+    let toolCallLog: string[] = [];
 
+    safeLog('🔄 Starting agentic loop...');
+
+    while (iterations < MAX_ITERATIONS) {
+      iterations++;
+      safeLog(`\n   [Iteration ${iterations}/${MAX_ITERATIONS}]`);
+
+      // Call DeepSeek with tools
+      const completion = await deepseekClient.chat.completions.create({
+        model: 'deepseek-chat', // Using deepseek-chat which supports function calling
+        messages,
+        tools: AGENT_TOOLS,
+        tool_choice: 'auto',
+        temperature: 0.3,
+        max_tokens: 4000
+      });
+
+      totalTokens += completion.usage?.total_tokens || 0;
+      const message = completion.choices[0].message;
+
+      // Check if model wants to call tools
+      if (message.tool_calls && message.tool_calls.length > 0) {
+        safeLog(`   📞 Agent requesting ${message.tool_calls.length} tool call(s)`);
+
+        // Add assistant message with tool calls to conversation
+        messages.push(message as OpenAI.Chat.ChatCompletionMessageParam);
+
+        // Execute each tool call
+        for (const toolCall of message.tool_calls) {
+          const toolName = toolCall.function.name;
+          let toolArgs: Record<string, any> = {};
+
+          try {
+            toolArgs = JSON.parse(toolCall.function.arguments);
+          } catch {
+            toolArgs = {};
+          }
+
+          toolCallLog.push(`${toolName}(${JSON.stringify(toolArgs).slice(0, 50)}...)`);
+
+          // Execute the tool
+          const toolResult = await executeAgentTool(toolName, toolArgs);
+
+          // Add tool result to conversation
+          messages.push({
+            role: 'tool',
+            tool_call_id: toolCall.id,
+            content: toolResult
+          });
+        }
+      } else {
+        // No tool calls - this is the final response
+        safeLog('   ✅ Agent finished (no more tool calls)');
+        const finalResponse = message.content || 'Agent completed but returned no content.';
+
+        const elapsed = Date.now() - startTime;
+        const verificationToken = `AGENT-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+        // Format response with metadata
+        const formattedResponse = `[${agentType.toUpperCase()} AGENT RESPONSE]
+[VERIFIED: ${verificationToken} | Iterations: ${iterations} | Tools Used: ${toolCallLog.length} | Time: ${elapsed}ms | Tokens: ${totalTokens}]
+[Tool Calls: ${toolCallLog.join(', ') || 'none'}]
+
+${finalResponse}`;
+
+        safeLog(`\n   🏁 Agent complete: ${iterations} iterations, ${toolCallLog.length} tool calls, ${elapsed}ms`);
+
+        return {
+          success: true,
+          content: formattedResponse
+        };
+      }
+    }
+
+    // Max iterations reached
     const elapsed = Date.now() - startTime;
-    console.log(`✅ DeepSeek API returned in ${elapsed}ms`);
-    console.log(`   Usage: ${JSON.stringify(completion.usage)}`);
-
-    const agentResponse = completion.choices[0].message.content || '';
-
-    // Anti-hallucination: Include verifiable proof this was a real API call
-    const verificationToken = `DEEPSEEK-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const apiLatency = elapsed;
-
-    // Format the response with agent type header AND verification
-    const formattedResponse = `[${agentType.toUpperCase()} AGENT RESPONSE]
-[VERIFIED: ${verificationToken} | Latency: ${apiLatency}ms | Tokens: ${completion.usage?.total_tokens || 'unknown'}]
-
-${agentResponse}`;
-
     return {
       success: true,
-      content: formattedResponse
+      content: `[${agentType.toUpperCase()} AGENT - MAX ITERATIONS]
+Agent reached maximum iterations (${MAX_ITERATIONS}).
+Tool calls made: ${toolCallLog.join(', ')}
+Time elapsed: ${elapsed}ms
+Tokens used: ${totalTokens}
+
+The agent may not have fully completed the task. Consider breaking it into smaller tasks.`
     };
+
   } catch (error: any) {
+    console.error('❌ Agent spawn error:', error);
     return {
       success: false,
       content: '',
@@ -1300,15 +1527,247 @@ ${agentResponse}`;
   }
 }
 
+// Interface for parallel agent configuration
+interface ParallelAgentConfig {
+  id: string;
+  task: string;
+  agent_type: string;
+  context?: string;
+}
+
+/**
+ * Spawn multiple agents in PARALLEL with full tool calling capabilities
+ * This is MUCH faster than sequential spawn_agent calls for independent tasks
+ */
+export async function spawnAgentsParallel(
+  agents: ParallelAgentConfig[]
+): Promise<ToolResult> {
+  const startTime = Date.now();
+
+  safeLog('\n' + '='.repeat(60));
+  safeLog('🚀🚀 SPAWN_AGENTS_PARALLEL - MULTI-AGENT WITH TOOLS');
+  safeLog(`   Spawning ${agents.length} agents in parallel`);
+  agents.forEach((a, i) => safeLog(`   Agent ${i + 1}: ${a.id} (${a.agent_type})`));
+  safeLog(`   Timestamp: ${new Date().toISOString()}`);
+  safeLog('='.repeat(60));
+
+  try {
+    const deepseekClient = getDeepSeekClient();
+    if (!deepseekClient) {
+      return {
+        success: false,
+        content: '',
+        error: 'DEEPSEEK_API_KEY not configured. Go to Settings to add your API key.'
+      };
+    }
+
+    // Launch all agents in parallel using Promise.all
+    const agentPromises = agents.map(async (agentConfig) => {
+      safeLog(`\n   [${agentConfig.id}] Starting agent: ${agentConfig.agent_type}`);
+      const agentStartTime = Date.now();
+
+      try {
+        // Run the full agentic loop for this agent
+        const result = await runAgentWithTools(
+          deepseekClient,
+          agentConfig.task,
+          agentConfig.agent_type,
+          agentConfig.context,
+          agentConfig.id
+        );
+
+        const elapsed = Date.now() - agentStartTime;
+        safeLog(`   [${agentConfig.id}] ✅ Completed in ${elapsed}ms`);
+
+        return {
+          id: agentConfig.id,
+          success: true,
+          content: result.content,
+          elapsed
+        };
+      } catch (error: any) {
+        const elapsed = Date.now() - agentStartTime;
+        safeLog(`   [${agentConfig.id}] ❌ Failed in ${elapsed}ms: ${error.message}`);
+
+        return {
+          id: agentConfig.id,
+          success: false,
+          content: '',
+          error: error.message,
+          elapsed
+        };
+      }
+    });
+
+    // Wait for all agents to complete
+    const results = await Promise.all(agentPromises);
+    const totalElapsed = Date.now() - startTime;
+
+    // Format results
+    const successCount = results.filter(r => r.success).length;
+    const failCount = results.filter(r => !r.success).length;
+
+    let formattedOutput = `[PARALLEL AGENTS COMPLETE]
+[Spawned: ${agents.length} | Succeeded: ${successCount} | Failed: ${failCount} | Total Time: ${totalElapsed}ms]
+
+`;
+
+    for (const result of results) {
+      formattedOutput += `\n${'='.repeat(50)}\n`;
+      formattedOutput += `## Agent: ${result.id} (${result.success ? '✅ SUCCESS' : '❌ FAILED'}) [${result.elapsed}ms]\n`;
+      formattedOutput += `${'='.repeat(50)}\n`;
+
+      if (result.success) {
+        formattedOutput += result.content;
+      } else {
+        formattedOutput += `Error: ${result.error}`;
+      }
+      formattedOutput += '\n';
+    }
+
+    safeLog(`\n🏁 All ${agents.length} parallel agents complete in ${totalElapsed}ms`);
+
+    return {
+      success: failCount === 0,
+      content: formattedOutput,
+      error: failCount > 0 ? `${failCount} agent(s) failed` : undefined
+    };
+
+  } catch (error: any) {
+    console.error('❌ Parallel agent spawn error:', error);
+    return {
+      success: false,
+      content: '',
+      error: `Parallel agent spawn failed: ${error.message || String(error)}`
+    };
+  }
+}
+
+/**
+ * Internal helper: Run a single agent with full tool calling capabilities
+ * Used by both spawnAgent and spawnAgentsParallel
+ */
+async function runAgentWithTools(
+  client: OpenAI,
+  task: string,
+  agentType: string,
+  context?: string,
+  agentId?: string
+): Promise<{ content: string; toolsUsed: number; iterations: number }> {
+  const prefix = agentId ? `[${agentId}]` : '';
+
+  // Agent-specific system prompts with tool instructions
+  const agentPrompts: Record<string, string> = {
+    analyst: `You are a data analyst agent with FULL TOOL ACCESS.
+You can read files, list directories, search code, write files, and run commands.
+USE YOUR TOOLS to gather the information you need before providing analysis.
+Do not ask for file contents - read them yourself using read_file.
+Be thorough: explore the codebase, read relevant files, then provide specific, data-backed analysis.`,
+    reviewer: `You are a code reviewer agent with FULL TOOL ACCESS.
+You can read files, list directories, search code, and run tests.
+USE YOUR TOOLS to read the actual code before reviewing.
+Do not rely on context passed to you - read the files yourself for accuracy.
+Be specific: cite line numbers, show code snippets, suggest concrete fixes.`,
+    researcher: `You are a research agent with FULL TOOL ACCESS.
+You can explore the codebase, read files, search for patterns, and run commands.
+USE YOUR TOOLS to investigate thoroughly before drawing conclusions.
+Provide comprehensive analysis with specific evidence from the code.`,
+    coder: `You are a coding agent with FULL TOOL ACCESS.
+You can read existing code, write new code, and run tests to verify your work.
+USE YOUR TOOLS: read existing files to understand patterns, write your code, then test it.
+Follow the coding style you observe in the codebase. Include error handling.`
+  };
+
+  const systemPrompt = agentPrompts[agentType.toLowerCase()] || agentPrompts.analyst;
+  const userMessage = context ? `${task}\n\n## Initial Context:\n${context}` : task;
+
+  // Initialize conversation
+  const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userMessage }
+  ];
+
+  // Agentic loop
+  const MAX_ITERATIONS = 15;
+  let iterations = 0;
+  let totalTokens = 0;
+  let toolCallCount = 0;
+
+  while (iterations < MAX_ITERATIONS) {
+    iterations++;
+
+    const completion = await client.chat.completions.create({
+      model: 'deepseek-chat',
+      messages,
+      tools: AGENT_TOOLS,
+      tool_choice: 'auto',
+      temperature: 0.3,
+      max_tokens: 4000
+    });
+
+    totalTokens += completion.usage?.total_tokens || 0;
+    const message = completion.choices[0].message;
+
+    if (message.tool_calls && message.tool_calls.length > 0) {
+      safeLog(`   ${prefix} Iteration ${iterations}: ${message.tool_calls.length} tool call(s)`);
+
+      messages.push(message as OpenAI.Chat.ChatCompletionMessageParam);
+
+      for (const toolCall of message.tool_calls) {
+        const toolName = toolCall.function.name;
+        let toolArgs: Record<string, any> = {};
+
+        try {
+          toolArgs = JSON.parse(toolCall.function.arguments);
+        } catch {
+          toolArgs = {};
+        }
+
+        toolCallCount++;
+        const toolResult = await executeAgentTool(toolName, toolArgs);
+
+        messages.push({
+          role: 'tool',
+          tool_call_id: toolCall.id,
+          content: toolResult
+        });
+      }
+    } else {
+      // Final response
+      const finalResponse = message.content || 'Agent completed but returned no content.';
+
+      return {
+        content: finalResponse,
+        toolsUsed: toolCallCount,
+        iterations
+      };
+    }
+  }
+
+  // Max iterations
+  return {
+    content: `Agent reached maximum iterations (${MAX_ITERATIONS}). Consider breaking into smaller tasks.`,
+    toolsUsed: toolCallCount,
+    iterations: MAX_ITERATIONS
+  };
+}
+
 // ==================== TOOL DISPATCHER ====================
 
 export async function executeTool(
   name: string,
   args: Record<string, any>
 ): Promise<ToolResult> {
-  console.log(`[Tool] Executing: ${name}`, args);
+  safeLog(`[Tool] Executing: ${name}`, args);
 
   switch (name) {
+    // Direct response (no-op tool for conversational responses)
+    case 'respond_directly':
+      return {
+        success: true,
+        content: args.response || ''
+      };
+
     // File operations
     case 'read_file':
       return readFile(args.path);
@@ -1386,6 +1845,8 @@ export async function executeTool(
     // Agent spawning
     case 'spawn_agent':
       return spawnAgent(args.task, args.agent_type, args.context);
+    case 'spawn_agents_parallel':
+      return spawnAgentsParallel(args.agents);
 
     // Backup cleanup
     case 'cleanup_backups':

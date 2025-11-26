@@ -605,11 +605,11 @@ export const DATA_TOOLS: FunctionDeclaration[] = [
   }
 ];
 
-// Agent spawning tools
+// Agent spawning tools - RESTRICTED USE
 export const AGENT_TOOLS: FunctionDeclaration[] = [
   {
     name: 'spawn_agent',
-    description: 'Spawn a sub-agent to handle a specific task in parallel. Use for code review, analysis, research, or any task that can be delegated. The agent will execute using DeepSeek and return results.',
+    description: 'RARELY NEEDED. Spawn a sub-agent ONLY for genuinely complex multi-step analysis tasks. DO NOT USE for: simple questions, reading files, conversations, explanations, or any task you can do directly. For reading files, use read_file directly. For searching code, use search_code directly. Only spawn agents for deep multi-file reviews or complex analysis that would take 10+ tool calls.',
     parameters: {
       type: SchemaType.OBJECT,
       properties: {
@@ -627,6 +627,42 @@ export const AGENT_TOOLS: FunctionDeclaration[] = [
         }
       },
       required: ['task', 'agent_type']
+    }
+  },
+  {
+    name: 'spawn_agents_parallel',
+    description: 'RARELY NEEDED. Spawn multiple agents ONLY when user explicitly requests parallel review of 3+ files or components. DO NOT USE for: simple questions, single file reads, conversations, explanations. For most tasks, use read_file/search_code directly. Only use when genuinely reviewing multiple independent items in depth.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        agents: {
+          type: SchemaType.ARRAY,
+          description: 'Array of agent configurations to run in parallel',
+          items: {
+            type: SchemaType.OBJECT,
+            properties: {
+              id: {
+                type: SchemaType.STRING,
+                description: 'Unique identifier for this agent (used to match results)'
+              },
+              task: {
+                type: SchemaType.STRING,
+                description: 'Clear description of what this agent should accomplish'
+              },
+              agent_type: {
+                type: SchemaType.STRING,
+                description: 'Type of agent: analyst, reviewer, researcher, coder'
+              },
+              context: {
+                type: SchemaType.STRING,
+                description: 'Optional context specific to this agent'
+              }
+            },
+            required: ['id', 'task', 'agent_type']
+          }
+        }
+      },
+      required: ['agents']
     }
   }
 ];
@@ -652,8 +688,27 @@ export const MAINTENANCE_TOOLS: FunctionDeclaration[] = [
   }
 ];
 
-// All tools combined
+// Response tool - allows model to respond directly without using other tools
+export const RESPONSE_TOOLS: FunctionDeclaration[] = [
+  {
+    name: 'respond_directly',
+    description: 'USE THIS for most interactions: conversations, explanations, questions, greetings, advice, opinions, follow-ups. This is the DEFAULT choice. Only use other tools when you specifically need to read/write files or run commands.',
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        response: {
+          type: SchemaType.STRING,
+          description: 'Your response to the user'
+        }
+      },
+      required: ['response']
+    }
+  }
+];
+
+// All tools combined - respond_directly FIRST so it's preferred
 export const ALL_TOOLS: FunctionDeclaration[] = [
+  ...RESPONSE_TOOLS,
   ...FILE_TOOLS,
   ...GIT_TOOLS,
   ...VALIDATION_TOOLS,

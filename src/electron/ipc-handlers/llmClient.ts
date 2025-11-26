@@ -20,6 +20,18 @@ const HELPER_MODEL = MODELS.HELPER.model;
 // Max tool call iterations to prevent infinite loops
 const MAX_TOOL_ITERATIONS = 10;
 
+// Safe logging that won't crash on EPIPE (broken pipe)
+function safeLog(...args: any[]): void {
+  try {
+    console.log(...args);
+  } catch (e: any) {
+    // Silently ignore EPIPE errors - happens when stdout closed
+    if (e.code !== 'EPIPE' && e.message !== 'write EPIPE') {
+      throw e;
+    }
+  }
+}
+
 // List of tool names we can parse from hallucinated text
 const PARSEABLE_TOOLS = [
   'spawn_agent',
@@ -49,7 +61,7 @@ function parseHallucinatedToolCalls(text: string): Array<{ name: string; args: R
       const argsStr = match[1];
       const args = parseArgsString(argsStr);
       if (Object.keys(args).length > 0) {
-        console.log(`[PARSER] Found emoji-style call: ${toolName}`, args);
+        safeLog(`[PARSER] Found emoji-style call: ${toolName}`, args);
         calls.push({ name: toolName, args });
       }
     }
@@ -59,7 +71,7 @@ function parseHallucinatedToolCalls(text: string): Array<{ name: string; args: R
     while ((match = jsonPattern.exec(text)) !== null) {
       try {
         const args = JSON.parse(match[1]);
-        console.log(`[PARSER] Found JSON-style call: ${toolName}`, args);
+        safeLog(`[PARSER] Found JSON-style call: ${toolName}`, args);
         calls.push({ name: toolName, args });
       } catch {
         // Invalid JSON, skip
@@ -72,7 +84,7 @@ function parseHallucinatedToolCalls(text: string): Array<{ name: string; args: R
       const argsStr = match[1];
       const args = parseArgsString(argsStr);
       if (Object.keys(args).length > 0) {
-        console.log(`[PARSER] Found bold-style call: ${toolName}`, args);
+        safeLog(`[PARSER] Found bold-style call: ${toolName}`, args);
         calls.push({ name: toolName, args });
       }
     }
@@ -83,7 +95,7 @@ function parseHallucinatedToolCalls(text: string): Array<{ name: string; args: R
       const argsStr = match[1];
       const args = parseArgsString(argsStr);
       if (Object.keys(args).length > 0) {
-        console.log(`[PARSER] Found code-style call: ${toolName}`, args);
+        safeLog(`[PARSER] Found code-style call: ${toolName}`, args);
         calls.push({ name: toolName, args });
       }
     }
@@ -134,7 +146,7 @@ let currentRequestCancelled = false;
 // Export cancellation function for use in handlers
 export function cancelCurrentRequest() {
   currentRequestCancelled = true;
-  console.log('[LLM] Request cancellation requested');
+  safeLog('[LLM] Request cancellation requested');
 }
 
 // Check if request is cancelled (resets the flag after checking)
@@ -180,7 +192,7 @@ async function withRetry<T>(
 
       // Exponential backoff
       const delay = delayMs * Math.pow(2, attempt - 1);
-      console.log(`[Retry] Attempt ${attempt}/${maxRetries} failed, retrying in ${delay}ms...`, error.message);
+      safeLog(`[Retry] Attempt ${attempt}/${maxRetries} failed, retrying in ${delay}ms...`, error.message);
       await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
@@ -251,31 +263,60 @@ export function registerLlmHandlers() {
       // Build system instruction with EXPLICIT tool usage directive
       const toolDirective = `
 
-CRITICAL INSTRUCTION: You have access to tools that let you ACTUALLY read and modify the codebase.
-DO NOT make up file contents or guess at code structure.
-DO NOT describe what you would do - USE THE TOOLS to actually do it.
-ALWAYS use list_directory and read_file to examine code BEFORE answering questions about it.
-When asked about the codebase, your FIRST action should be to use tools to explore it.
+## RESPONSE PRIORITY (Follow this order):
 
-Available tools: read_file, list_directory, search_code, write_file, git_status, git_diff, run_tests, etc.
+1. **RESPOND DIRECTLY** for:
+   - Conversations, greetings, questions about yourself
+   - Explanations, concepts, advice, opinions
+   - Simple questions you can answer from knowledge
+   - Follow-up questions in ongoing discussion
+   - ANY request that doesn't require reading/writing files
+
+2. **USE SIMPLE TOOLS** (read_file, list_directory, search_code) for:
+   - Reading a specific file the user mentions
+   - Exploring the codebase structure
+   - Finding code patterns or implementations
+   - Making small edits to files
+
+3. **SPAWN AGENTS** ONLY for complex multi-part tasks:
+   - Reviewing multiple files simultaneously
+   - Deep analysis requiring extensive exploration
+   - Tasks explicitly requesting agent help
+
+## TOOL USAGE RULES:
+
+When you DO need to interact with code:
+- Use read_file, list_directory, search_code DIRECTLY - don't spawn an agent for simple reads
+- Only spawn agents for genuinely complex, multi-file tasks
+
+## AGENT SPAWNING (Use sparingly):
+
+- **spawn_agents_parallel**: Multiple INDEPENDENT tasks (e.g., "review these 3 files")
+- **spawn_agent**: Sequential tasks where one depends on another
+
+DO NOT spawn agents for:
+- Simple file reads (use read_file directly)
+- Single file operations
+- Questions you can answer directly
+- Conversations
 `;
 
       const fullSystemInstruction = (systemMessage?.content || '') + toolDirective;
 
       // Get model with tools enabled, explicit toolConfig, and system instruction
-      // Setting toolConfig explicitly to encourage function calling over text generation
+      // AUTO mode lets model choose: respond directly OR use tools as appropriate
       // See: https://ai.google.dev/gemini-api/docs/function-calling#function-calling-modes
       const model = geminiClient.getGenerativeModel({
         model: PRIMARY_MODEL,
         tools: [{ functionDeclarations: ALL_TOOLS }],
         toolConfig: {
           functionCallingConfig: {
-            mode: 'ANY' as any, // ANY forces function calling - model MUST call a function
+            mode: 'ANY' as any, // ANY required - AUTO doesn't call tools at all
           }
         },
         systemInstruction: fullSystemInstruction,
         generationConfig: {
-          temperature: 0.3, // Lower temperature for more deterministic tool calling
+          temperature: 0.3,
         },
       });
 
@@ -330,7 +371,7 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
       while (iterations < MAX_TOOL_ITERATIONS) {
         // Check for cancellation at start of each iteration
         if (checkCancelled()) {
-          console.log('[LLM] Request cancelled by user');
+          safeLog('[LLM] Request cancelled by user');
           _event.sender.send('llm-stream', {
             type: 'cancelled',
             content: '\n\n*Request cancelled by user.*',
@@ -350,23 +391,23 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
 
         // DEBUG: Log exactly what Gemini returned
         const allParts = candidate.content?.parts || [];
-        console.log('\n' + '='.repeat(60));
-        console.log('[DEBUG] GEMINI RESPONSE ANALYSIS');
-        console.log('  Total parts:', allParts.length);
+        safeLog('\n' + '='.repeat(60));
+        safeLog('[DEBUG] GEMINI RESPONSE ANALYSIS');
+        safeLog('  Total parts:', allParts.length);
         allParts.forEach((part: any, i: number) => {
           const hasText = !!part.text;
           const hasFunctionCall = !!part.functionCall;
-          console.log(`  Part ${i}: text=${hasText}, functionCall=${hasFunctionCall}`);
+          safeLog(`  Part ${i}: text=${hasText}, functionCall=${hasFunctionCall}`);
           if (hasFunctionCall) {
-            console.log(`    → REAL TOOL CALL: ${part.functionCall.name}`);
-            console.log(`    → Args: ${JSON.stringify(part.functionCall.args)}`);
+            safeLog(`    → REAL TOOL CALL: ${part.functionCall.name}`);
+            safeLog(`    → Args: ${JSON.stringify(part.functionCall.args)}`);
           }
           if (hasText && part.text.includes('spawn_agent')) {
-            console.log('    ⚠️  TEXT CONTAINS "spawn_agent" - HALLUCINATION DETECTED');
-            console.log(`    → Text preview: ${part.text.slice(0, 200)}...`);
+            safeLog('    ⚠️  TEXT CONTAINS "spawn_agent" - HALLUCINATION DETECTED');
+            safeLog(`    → Text preview: ${part.text.slice(0, 200)}...`);
           }
         });
-        console.log('='.repeat(60) + '\n');
+        safeLog('='.repeat(60) + '\n');
 
         // Check if model wants to call tools
         const functionCalls = candidate.content?.parts?.filter(
@@ -382,7 +423,7 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
           const hallucinatedCalls = parseHallucinatedToolCalls(fullText);
 
           if (hallucinatedCalls.length > 0) {
-            console.log(`[FALLBACK] Detected ${hallucinatedCalls.length} hallucinated tool calls in text - EXECUTING THEM`);
+            safeLog(`[FALLBACK] Detected ${hallucinatedCalls.length} hallucinated tool calls in text - EXECUTING THEM`);
 
             // CRITICAL: Clear the hallucinated response from the UI before showing real results
             // Gemini streamed fake tool calls AND fake results - we need to discard them
@@ -409,7 +450,7 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
             }> = [];
 
             for (const hCall of hallucinatedCalls) {
-              console.log(`[FALLBACK] Executing hallucinated: ${hCall.name}`, hCall.args);
+              safeLog(`[FALLBACK] Executing hallucinated: ${hCall.name}`, hCall.args);
 
               _event.sender.send('tool-progress', {
                 type: 'executing',
@@ -442,7 +483,7 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
                 allToolOutputs.push(`[${hCall.name}]: ${output.slice(0, 500)}${output.length > 500 ? '...' : ''}`);
               } catch (error) {
                 const errorMsg = error instanceof Error ? error.message : String(error);
-                console.log(`[FALLBACK] Tool error: ${errorMsg}`);
+                safeLog(`[FALLBACK] Tool error: ${errorMsg}`);
                 toolResults.push({
                   functionResponse: {
                     name: hCall.name,
@@ -466,11 +507,11 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
           }
 
           // No more tool calls (real or hallucinated), we have the final response
-          console.log('[DEBUG] No functionCall parts found - Gemini returned text only');
+          safeLog('[DEBUG] No functionCall parts found - Gemini returned text only');
           break;
         }
 
-        console.log(`[LLM] Executing ${functionCalls.length} tool calls (iteration ${iterations + 1})`);
+        safeLog(`[LLM] Executing ${functionCalls.length} tool calls (iteration ${iterations + 1})`);
 
         // Emit event when entering tool loop
         _event.sender.send('tool-progress', {
@@ -491,7 +532,7 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
         for (const part of functionCalls) {
           // Check for cancellation before each tool
           if (checkCancelled()) {
-            console.log('[LLM] Request cancelled during tool execution');
+            safeLog('[LLM] Request cancelled during tool execution');
             _event.sender.send('llm-stream', {
               type: 'cancelled',
               content: '\n\n*Request cancelled by user during tool execution.*',
@@ -510,7 +551,29 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
           const toolName = call.name;
           const toolArgs = call.args || {};
 
-          console.log(`[Tool] Calling: ${toolName}`, toolArgs);
+          safeLog(`[Tool] Calling: ${toolName}`, toolArgs);
+
+          // SPECIAL CASE: respond_directly is the model's way of giving a text response
+          // Return immediately without going through tool loop
+          if (toolName === 'respond_directly') {
+            const directResponse = toolArgs.response || '';
+            safeLog('[LLM] Model chose respond_directly - returning text response');
+
+            // Stream the response
+            _event.sender.send('llm-stream', {
+              type: 'content',
+              content: directResponse,
+              timestamp: Date.now()
+            });
+
+            return {
+              content: directResponse,
+              provider: PRIMARY_PROVIDER,
+              model: PRIMARY_MODEL,
+              toolsUsed: 0,
+              toolLog: []
+            };
+          }
 
           // Emit BEFORE executing tool
           _event.sender.send('tool-progress', {
@@ -589,7 +652,7 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
 
       // If we did tool calls but got no final text, ask model to synthesize
       if (!finalText.trim() && iterations > 0 && allToolOutputs.length > 0) {
-        console.log('[LLM] No final text after tool calls, requesting synthesis...');
+        safeLog('[LLM] No final text after tool calls, requesting synthesis...');
         _event.sender.send('llm-stream', {
           type: 'thinking',
           content: '\n\n*Synthesizing response from tool results...*\n\n',
@@ -675,7 +738,7 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
           break;
         }
 
-        console.log(`[Swarm] Executing ${message.tool_calls.length} tool calls (iteration ${iterations + 1})`);
+        safeLog(`[Swarm] Executing ${message.tool_calls.length} tool calls (iteration ${iterations + 1})`);
 
         // Emit event when entering tool loop
         _event.sender.send('tool-progress', {
@@ -705,7 +768,7 @@ Available tools: read_file, list_directory, search_code, write_file, git_status,
             toolArgs = {};
           }
 
-          console.log(`[Tool] Calling: ${toolName}`, toolArgs);
+          safeLog(`[Tool] Calling: ${toolName}`, toolArgs);
 
           // Emit BEFORE executing tool
           _event.sender.send('tool-progress', {
