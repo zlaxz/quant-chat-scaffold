@@ -436,9 +436,27 @@ Consistent color language throughout:
 
 ---
 
-### Phase 2: Research Roadmap (1-2 days)
+### Phase 2: Directive Parser & Context Integration ✅ COMPLETE
+
+**Goal**: Wire Chief Quant's directives to automatically trigger UI updates
+
+**Completed**: All directives (`stage`, `display`, `progress`, `focus`, `hide`, `display_artifact`) now automatically parsed and trigger appropriate UI updates.
+
+---
+
+### Phase 3: Research Roadmap ✅ COMPLETE
 
 **Goal**: Visual journey map that tracks progress
+
+**Completed**: Enhanced RoadmapTracker with sub-steps, expand/collapse interactivity, completion tracking with timestamps, and progress percentage display.
+
+---
+
+### Phase 4: Stage-Specific Visualizations ✅ COMPLETE
+
+**Goal**: Auto-show appropriate visualizations based on current research stage
+
+**Completed**: Created StageVisualizationMapper with stage → visualization mappings, auto-display effect in DualPurposePanel, educational empty states with learning moments for each stage.
 
 1. Define research journey stages and sub-steps
 2. Create roadmap visualization component

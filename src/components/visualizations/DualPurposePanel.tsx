@@ -13,8 +13,9 @@ import { DiscoveryMatrix } from './DiscoveryMatrix';
 import { DiscoveryFunnel } from './DiscoveryFunnel';
 import { ScenarioSimulator } from './ScenarioSimulator';
 import { Card } from '@/components/ui/card';
-import { Brain, TrendingUp, Calendar } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { getStageVisualizationConfig } from '@/lib/stageVisualizationMapper';
 import {
   generateRegimeHeatmap,
   generateStrategyCards,
@@ -23,9 +24,21 @@ import {
 } from '@/lib/mockData';
 
 export const DualPurposePanel = () => {
-  const { state, currentArtifact, clearArtifact } = useResearchDisplay();
+  const { state, currentArtifact, clearArtifact, showVisualization } = useResearchDisplay();
   const [displayMode, setDisplayMode] = useState<'visualization' | 'artifact'>('visualization');
   const [autoReturnTimer, setAutoReturnTimer] = useState<NodeJS.Timeout | null>(null);
+
+  // Phase 4: Auto-show stage-appropriate visualizations when stage changes
+  useEffect(() => {
+    const config = getStageVisualizationConfig(state.currentStage);
+    
+    // Auto-show default visualizations for current stage (only if no visualizations active)
+    if (config.defaultVisualizations.length > 0 && state.activeVisualizations.length === 0) {
+      config.defaultVisualizations.forEach(viz => {
+        showVisualization(viz);
+      });
+    }
+  }, [state.currentStage, state.activeVisualizations.length, showVisualization]);
 
   // Manage mode transitions
   useEffect(() => {
@@ -85,7 +98,7 @@ export const DualPurposePanel = () => {
           ))}
         </div>
       ) : (
-        <EmptyState stage={state.currentStage} />
+        <StageEmptyState stage={state.currentStage} />
       )}
     </div>
   );
@@ -152,34 +165,54 @@ function renderVisualization(type: string) {
   }
 }
 
-function EmptyState({ stage }: { stage: string }) {
-  const stageInfo = {
-    idle: {
-      icon: Brain,
-      title: 'Ready to Start',
-      description: 'Ask Chief Quant to begin research. Try: "Map market regimes for 2023"',
-    },
-    regime_mapping: {
-      icon: Calendar,
-      title: 'Regime Mapping in Progress',
-      description: 'Analyzing market conditions and classifying regimes...',
-    },
-    strategy_discovery: {
-      icon: TrendingUp,
-      title: 'Strategy Discovery Running',
-      description: 'Swarm agents discovering optimal convexity profiles...',
-    },
-  };
-
-  const info = stageInfo[stage as keyof typeof stageInfo] || stageInfo.idle;
-  const Icon = info.icon;
+/**
+ * Phase 4: Stage-aware empty state with educational context
+ */
+function StageEmptyState({ stage }: { stage: string }) {
+  const config = getStageVisualizationConfig(stage as any);
 
   return (
-    <Card className="h-full flex items-center justify-center p-8">
-      <div className="text-center space-y-4 max-w-md">
-        <Icon className="h-12 w-12 mx-auto text-muted-foreground" />
-        <h3 className="text-lg font-semibold">{info.title}</h3>
-        <p className="text-sm text-muted-foreground">{info.description}</p>
+    <Card className="h-full flex items-center justify-center p-8 bg-card/50 backdrop-blur border-dashed animate-in fade-in duration-500">
+      <div className="text-center space-y-6 max-w-2xl">
+        <div className="text-7xl mb-6 animate-bounce">{config.emptyStateIcon}</div>
+        
+        <div className="space-y-3">
+          <h3 className="text-2xl font-bold">{config.emptyStateTitle}</h3>
+          <p className="text-base text-muted-foreground leading-relaxed">
+            {config.emptyStateMessage}
+          </p>
+        </div>
+
+        {config.educationalContext && (
+          <div className="mt-8 p-4 rounded-lg bg-primary/5 border border-primary/20">
+            <div className="flex items-start gap-3">
+              <div className="text-2xl shrink-0">💡</div>
+              <div className="text-left">
+                <p className="text-sm font-medium text-primary mb-1">Learning Moment</p>
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  {config.educationalContext}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {stage === 'idle' && (
+          <div className="mt-6 pt-6 border-t border-border">
+            <p className="text-xs text-muted-foreground mb-3">Try these prompts to get started:</p>
+            <div className="flex flex-wrap gap-2 justify-center">
+              <Button variant="outline" size="sm" className="text-xs">
+                Map market regimes from 2020-2024
+              </Button>
+              <Button variant="outline" size="sm" className="text-xs">
+                What should we discover today?
+              </Button>
+              <Button variant="outline" size="sm" className="text-xs">
+                Show me recent findings
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </Card>
   );
