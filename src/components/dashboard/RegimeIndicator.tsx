@@ -123,7 +123,10 @@ export function RegimeIndicator() {
 
       if (fetchError) {
         // If table doesn't exist or no data, use demo data for UI
-        if (fetchError.code === 'PGRST116' || fetchError.code === '42P01') {
+        // Handle all "table not found" error codes
+        if (fetchError.code === 'PGRST116' || // No rows returned
+            fetchError.code === 'PGRST205' || // Table not found in schema cache
+            fetchError.code === '42P01') {    // PostgreSQL relation does not exist
           // Use realistic demo defaults (typical low vol environment)
           setRegime({
             regime: 'LOW_VOL_GRIND',
@@ -137,6 +140,8 @@ export function RegimeIndicator() {
             confidence: 0.85,
           });
           setError('Demo mode - daemon not running');
+          setLoading(false);
+          return; // Early return to prevent throwing error
         } else {
           throw fetchError;
         }
