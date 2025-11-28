@@ -385,7 +385,7 @@ Let me start with the analysis...
       // ANY mode encourages aggressive tool usage - Gemini should call tools when user asks
       // This is CRITICAL - without ANY mode, Gemini will avoid using tools and apologize
       // See: https://ai.google.dev/gemini-api/docs/function-calling#function-calling-modes
-      // CRITICAL: Gemini 3 requires thinkingConfig for proper reasoning
+      // CRITICAL: Gemini 3 uses 'high' thinking level by default - DO NOT override
       // See: https://ai.google.dev/gemini-api/docs/gemini-3?thinking=high
       const model = geminiClient.getGenerativeModel({
         model: PRIMARY_MODEL,
@@ -397,9 +397,9 @@ Let me start with the analysis...
         },
         systemInstruction: fullSystemInstruction,
         generationConfig: {
-          temperature: 1.0, // Gemini 3 Pro setting
-          thinkingBudget: 'high' // GEMINI 3 ONLY: Enable thinking mode for complex reasoning
-        } as any,
+          temperature: 1.0, // Gemini 3 Pro default - DO NOT CHANGE
+          // thinking_level: 'high' is default - no need to specify
+        },
       });
 
       // Convert messages to Gemini format (excluding system messages)
@@ -512,11 +512,20 @@ Let me start with the analysis...
         );
 
         if (!functionCalls || functionCalls.length === 0) {
-          // RE-ENABLED: Parse text-based tool calls that Gemini outputs naturally
-          // Gemini prefers outputting tool calls as text - work with it, not against it
+          // DISABLED FOR TESTING: With Gemini 3 properly configured (temp 1.0, thinking mode),
+          // it should use proper function calling. Disable parser to verify.
+          safeLog('[DEBUG] No function calls detected - checking if Gemini 3 uses proper API');
           const textParts = allParts.filter((p: any) => p.text);
           const fullText = textParts.map((p: any) => p.text).join('');
-          const hallucinatedCalls = parseHallucinatedToolCalls(fullText);
+
+          // Log what Gemini returned instead of function calls
+          if (fullText && fullText.length > 0) {
+            safeLog('[DEBUG] Gemini returned text instead of function calls:');
+            safeLog(fullText.slice(0, 500));
+          }
+
+          // TEMPORARILY DISABLED: Test if Gemini 3 needs this parser
+          const hallucinatedCalls: any[] = []; // Disabled - test proper function calling
 
           if (hallucinatedCalls.length > 0) {
             safeLog(`[FALLBACK] Detected ${hallucinatedCalls.length} hallucinated tool calls in text - EXECUTING THEM`);
@@ -606,7 +615,13 @@ Let me start with the analysis...
           break;
         }
 
-        safeLog(`[LLM] Executing ${functionCalls.length} tool calls (iteration ${iterations + 1})`);
+        safeLog(`[LLM] ✅ Gemini used PROPER function calling - ${functionCalls.length} tool calls (iteration ${iterations + 1})`);
+
+        // Log each tool call for debugging
+        functionCalls.forEach((fc: any) => {
+          const call = (fc as any).functionCall;
+          safeLog(`  → ${call.name}(${JSON.stringify(call.args || {}).slice(0, 100)})`);
+        });
 
         // Emit event when entering tool loop
         _event.sender.send('tool-progress', {
