@@ -35,6 +35,19 @@ import {
   extractTodoComplete,
   extractTodoUpdate,
 } from '@/lib/displayDirectiveParser';
+import {
+  AgentSpawnMonitor,
+  ToolCallTree,
+  ThinkingStream,
+  ErrorCard,
+  MemoryRecallToast,
+  OperationProgress,
+  type AgentSpawn,
+  type ToolCall,
+  type ErrorDetails,
+  type Memory,
+  type OperationPhase,
+} from '@/components/research';
 
 interface Message {
   id: string;
@@ -75,6 +88,17 @@ export const ChatArea = () => {
   } | null>(null);
   // PERF: Cache memory context for session - don't re-fetch every message
   const [cachedMemoryContext, setCachedMemoryContext] = useState<string | null>(null);
+  
+  // New visual enhancement states
+  const [activeAgents, setActiveAgents] = useState<AgentSpawn[]>([]);
+  const [toolCallTree, setToolCallTree] = useState<ToolCall[]>([]);
+  const [thinkingContent, setThinkingContent] = useState('');
+  const [isThinking, setIsThinking] = useState(false);
+  const [currentError, setCurrentError] = useState<ErrorDetails | null>(null);
+  const [memoryRecalls, setMemoryRecalls] = useState<Memory[]>([]);
+  const [operationPhases, setOperationPhases] = useState<OperationPhase[]>([]);
+  const [operationStartTime, setOperationStartTime] = useState<number>(Date.now());
+  
   const { toast } = useToast();
   const scrollAreaRef = useRef<HTMLDivElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -536,6 +560,19 @@ export const ChatArea = () => {
     setIsLoading(true);
     setToolProgress([]);
     setStreamingContent('');
+    
+    // Import demo data
+    const { getDemoMemoryRecalls, getDemoAgents, getDemoToolCallTree, getDemoOperationPhases, getDemoThinkingText } = await import('@/lib/demoData');
+    
+    // Reset all visual states
+    setActiveAgents([]);
+    setToolCallTree([]);
+    setThinkingContent('');
+    setIsThinking(false);
+    setCurrentError(null);
+    setMemoryRecalls([]);
+    setOperationPhases([]);
+    setOperationStartTime(Date.now());
 
     // Add user message
     const userMsg: Message = {
@@ -546,7 +583,36 @@ export const ChatArea = () => {
     };
     setMessages(prev => [...prev, userMsg]);
 
+    await new Promise(r => setTimeout(r, 300));
+
+    // Show memory recall
+    setMemoryRecalls(getDemoMemoryRecalls());
+
+    await new Promise(r => setTimeout(r, 800));
+
+    // Show operation phases
+    setOperationPhases(getDemoOperationPhases());
+
+    // Show agents and tool tree
+    setActiveAgents(getDemoAgents());
+    setToolCallTree(getDemoToolCallTree());
+
     await new Promise(r => setTimeout(r, 500));
+
+    // Start thinking
+    setIsThinking(true);
+    const thinkingText = getDemoThinkingText();
+    
+    for (let i = 0; i < thinkingText.length; i += 20) {
+      setThinkingContent(thinkingText.slice(0, i + 20));
+      await new Promise(r => setTimeout(r, 50));
+    }
+    setThinkingContent(thinkingText);
+
+    await new Promise(r => setTimeout(r, 800));
+    
+    // Stop thinking
+    setIsThinking(false);
 
     // Simulate tool 1: list_directory
     setToolProgress([{
@@ -832,6 +898,59 @@ Each profile is regime-aware and adjusts parameters based on VIX levels and mark
                       </div>
                     )}
                   </div>
+
+                  {/* New Visual Enhancements */}
+                  
+                  {/* Memory Recall Toast */}
+                  {memoryRecalls.length > 0 && (
+                    <MemoryRecallToast
+                      memories={memoryRecalls}
+                      onClose={() => setMemoryRecalls([])}
+                      className="mb-3"
+                    />
+                  )}
+
+                  {/* Agent Spawn Monitor */}
+                  {activeAgents.length > 0 && (
+                    <AgentSpawnMonitor
+                      agents={activeAgents}
+                      className="mb-3"
+                    />
+                  )}
+
+                  {/* Tool Call Tree */}
+                  {toolCallTree.length > 0 && (
+                    <ToolCallTree
+                      calls={toolCallTree}
+                      className="mb-3"
+                    />
+                  )}
+
+                  {/* Operation Progress */}
+                  {operationPhases.length > 0 && operationPhases.some(p => p.status !== 'pending') && (
+                    <OperationProgress
+                      title="Chief Quant Analysis"
+                      phases={operationPhases}
+                      startTime={operationStartTime}
+                      className="mb-3"
+                    />
+                  )}
+
+                  {/* Thinking Stream */}
+                  <ThinkingStream
+                    content={thinkingContent}
+                    isActive={isThinking}
+                    className="mb-3"
+                  />
+
+                  {/* Error Card */}
+                  {currentError && (
+                    <ErrorCard
+                      error={currentError}
+                      onRetry={() => setCurrentError(null)}
+                      className="mb-3"
+                    />
+                  )}
 
                   {/* Streaming Response */}
                   {streamingContent && (
