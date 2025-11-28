@@ -171,8 +171,8 @@ async function handleBacktest(args: string, context: CommandContext): Promise<Co
           });
         }
 
-        // Determine status based on metrics
-        const sharpe = metrics.sharpe;
+        // Determine status based on metrics (with null safety)
+        const sharpe = metrics.sharpe ?? 0;
         let status: 'success' | 'warning' | 'error' = 'success';
         if (sharpe > 3) {
           status = 'warning'; // Potential overfitting
@@ -267,12 +267,17 @@ async function handleRuns(args: string, context: CommandContext): Promise<Comman
     const runsList = data.map((run, idx) => {
       const date = new Date(run.started_at || Date.now()).toLocaleDateString();
       const status = run.status === 'completed' ? '✅' : run.status === 'failed' ? '❌' : '⏳';
-      const metrics = run.metrics || {};
       
       let summary = `${idx + 1}. ${status} ${run.strategy_key} (${date})`;
       
-      if (run.status === 'completed' && metrics.cagr !== undefined) {
-        summary += `\n   CAGR: ${(metrics.cagr * 100).toFixed(2)}% | Sharpe: ${metrics.sharpe?.toFixed(2) || 'N/A'} | DD: ${metrics.max_drawdown !== undefined ? (metrics.max_drawdown * 100).toFixed(2) : 'N/A'}%`;
+      // Add null safety for metrics
+      if (run.status === 'completed' && run.metrics && typeof run.metrics.cagr === 'number') {
+        const cagr = (run.metrics.cagr * 100).toFixed(2);
+        const sharpe = run.metrics.sharpe?.toFixed(2) || 'N/A';
+        const maxDD = typeof run.metrics.max_drawdown === 'number' 
+          ? (run.metrics.max_drawdown * 100).toFixed(2) 
+          : 'N/A';
+        summary += `\n   CAGR: ${cagr}% | Sharpe: ${sharpe} | DD: ${maxDD}%`;
       } else if (run.status === 'failed') {
         summary += `\n   Error: ${run.error || 'Unknown'}`;
       }
