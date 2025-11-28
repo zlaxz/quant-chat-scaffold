@@ -48,7 +48,7 @@ export const StatusStrip = () => {
   const isActive = state.currentStage !== 'idle' || state.currentOperation;
 
   return (
-    <div className="h-12 border-b border-border bg-card/50 backdrop-blur px-4 flex items-center gap-4">
+    <div className="h-10 border-b border-border bg-muted/30 px-4 flex items-center gap-4">
       {/* Current Stage */}
       <div className="flex items-center gap-2">
         <Activity className={`h-4 w-4 ${isActive ? 'animate-pulse text-primary' : 'text-muted-foreground'}`} />
