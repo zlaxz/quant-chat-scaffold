@@ -2,6 +2,8 @@ import { useMemo, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { EducationalTooltip } from '@/components/ui/tooltip-educational';
+import { ChartExplainer } from './ChartExplainer';
 import { CheckCircle2, Loader2, Circle, XCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -70,11 +72,32 @@ export const DiscoveryMatrix = ({ strategies }: DiscoveryMatrixProps) => {
   return (
     <Card className="p-6">
       <div className="space-y-4">
-        <div>
-          <h3 className="text-lg font-semibold mb-2">Strategy × Regime Discovery Matrix</h3>
-          <p className="text-sm text-muted-foreground">
-            Exploration progress across strategy types and market regimes
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-lg font-semibold mb-2">
+              <EducationalTooltip
+                term="Discovery Matrix"
+                definition="A grid showing which strategy-regime combinations we're exploring. Each cell represents testing a specific strategy type in a specific market regime."
+              >
+                Strategy × Regime Discovery Matrix
+              </EducationalTooltip>
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Exploration progress across strategy types and market regimes
+            </p>
+          </div>
+          <ChartExplainer
+            title="Reading the Discovery Matrix"
+            explanation="Each cell shows the status of testing a strategy in a specific regime. We're systematically exploring which strategies work best in which market conditions."
+            whatToLookFor={[
+              "Green (Validated) cells are proven winners worth trading live",
+              "Yellow (Promising) cells need more testing but show potential",
+              "Blue (Testing) cells are currently being backtested",
+              "Red (Rejected) cells failed testing and should be avoided",
+              "Empty cells are unexplored territory - future research opportunities"
+            ]}
+            example="If 'Short Puts' shows validated (green) in Low Vol regime but rejected (red) in Crash regime, it means selling puts is safe during calm markets but disastrous during crashes."
+          />
         </div>
 
         {/* Legend */}
