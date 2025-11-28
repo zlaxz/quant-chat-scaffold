@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { EducationalTooltip } from '@/components/ui/tooltip-educational';
+import { ChartExplainer } from './ChartExplainer';
 import { cn } from '@/lib/utils';
 
 interface RegimeTimelineProps {
@@ -74,11 +76,31 @@ export const RegimeTimeline = ({ data, from, to, currentPosition }: RegimeTimeli
   return (
     <Card className="p-6">
       <div className="space-y-4">
-        <div>
-          <h3 className="text-lg font-semibold mb-2">Regime Classification Timeline</h3>
-          <p className="text-sm text-muted-foreground">
-            Visual map of market regimes over time
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-lg font-semibold mb-2">
+              <EducationalTooltip
+                term="Market Regime"
+                definition="A distinct market environment characterized by specific volatility and trend patterns. Think of it like weather - some days are calm, some stormy, some catastrophic."
+              >
+                Regime Classification Timeline
+              </EducationalTooltip>
+            </h3>
+            <p className="text-sm text-muted-foreground">
+              Visual map of market regimes over time
+            </p>
+          </div>
+          <ChartExplainer
+            title="Understanding the Regime Timeline"
+            explanation="This chart shows how market conditions change over time. Each colored bar represents one month, classified by its dominant regime (Low Vol, High Vol, Crash, etc.)."
+            whatToLookFor={[
+              "Long stretches of the same color indicate stable regime periods",
+              "Rapid color changes suggest market instability or transitions",
+              "Gray/unclassified areas are periods we haven't analyzed yet",
+              "The current position marker (▼) shows where we are in the analysis"
+            ]}
+            example="A transition from green (Low Vol) to red (Crash) in 2020 shows the COVID market collapse. Strategies optimized for Low Vol would have failed during this transition."
+          />
         </div>
 
         {/* Legend */}
