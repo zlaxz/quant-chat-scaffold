@@ -1,44 +1,50 @@
 import { Button } from '@/components/ui/button';
 import { Play } from 'lucide-react';
 import { useResearchDisplay } from '@/contexts/ResearchDisplayContext';
+import { toast } from 'sonner';
 
 export const DemoModeButton = () => {
   const display = useResearchDisplay();
 
   const runDemo = async () => {
-    // Stage 1: Regime Mapping
+    toast.info('Demo Mode: Watch Chief Quant analyze a strategy with full transparency');
+    
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Stage 1: Transparency explanation
     display.updateStage('regime_mapping');
+    display.updateProgress(0, 'Chief Quant explaining plan...');
+    
+    toast.info('Chief Quant: "I\'m analyzing Short Put OTM performance in 2023. I\'ll read /strategies/short_put_otm.py, inspect SPX data, backtest 3 profiles, and analyze trade logs."', { duration: 5000 });
+    
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    // Stage 2: Tool execution begins
+    display.updateProgress(25, 'Reading strategy file...');
+    toast.success('✓ Read /strategies/short_put_otm.py: 156 lines, 4 parameters', { duration: 3000 });
+    
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    display.updateProgress(50, 'Inspecting market data...');
+    toast.success('✓ SPX data 2023-01-01 to 2023-12-31: 252 days, VIX 12.4-28.7', { duration: 3000 });
+    
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Stage 3: Backtesting
+    display.updateStage('backtesting');
+    display.updateProgress(75, 'Running backtest...');
+    toast.success('✓ Backtest complete: Sharpe 1.85, Win Rate 68%, Max DD -12.4%', { duration: 3000 });
+    
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    display.updateProgress(100, 'Analysis complete');
     display.showVisualization('regime_timeline');
-    display.updateProgress(0, 'Starting regime classification...');
     
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    display.updateProgress(33, 'Analyzing 2020-2021...');
-    
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    display.updateProgress(66, 'Analyzing 2022-2023...');
-    
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    display.updateProgress(100, 'Classification complete');
-    display.showVisualization('regime_distribution');
+    toast.success('Analysis Complete! Chief Quant found that Profile 2 (45 DTE, 0.30 delta) worked best in low-vol periods.', { duration: 5000 });
     
     await new Promise(resolve => setTimeout(resolve, 3000));
     
-    // Stage 2: Strategy Discovery
-    display.updateStage('strategy_discovery');
-    display.hideAllVisualizations();
-    display.showVisualization('discovery_matrix');
-    display.updateProgress(0, 'Discovering strategies...');
-    
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    display.updateProgress(50, 'Testing regime-strategy pairs...');
-    display.showVisualization('discovery_funnel');
-    
-    await new Promise(resolve => setTimeout(resolve, 3000));
-    display.updateProgress(100, 'Discovery complete');
-    
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Done
+    // Reset
     display.updateStage('idle');
     display.hideAllVisualizations();
     display.updateProgress(0);
