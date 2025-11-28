@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/components/layout/MainLayout';
 import { ChatArea } from '@/components/chat/ChatArea';
@@ -6,6 +6,7 @@ import { DualPurposePanel } from '@/components/visualizations/DualPurposePanel';
 import { RoadmapTracker } from '@/components/research/RoadmapTracker';
 import { StatusStrip } from '@/components/research/StatusStrip';
 import { HelperChatDialog } from '@/components/chat/HelperChatDialog';
+import { OnboardingWizard } from '@/components/onboarding/OnboardingWizard';
 import { DemoModeButton } from '@/components/visualizations/DemoModeButton';
 import { Button } from '@/components/ui/button';
 import { HelpCircle, Settings, LayoutDashboard, Command } from 'lucide-react';
@@ -14,7 +15,16 @@ import { RegimeIndicator } from '@/components/dashboard/RegimeIndicator';
 
 const Index = () => {
   const [helperOpen, setHelperOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const navigate = useNavigate();
+
+  // Check if first launch
+  useEffect(() => {
+    const hasCompletedOnboarding = localStorage.getItem('quantos_onboarding_completed');
+    if (!hasCompletedOnboarding) {
+      setOnboardingOpen(true);
+    }
+  }, []);
 
   return (
     <div className="h-screen flex flex-col bg-background w-full">
@@ -95,6 +105,11 @@ const Index = () => {
       </div>
 
       <HelperChatDialog open={helperOpen} onOpenChange={setHelperOpen} />
+      <OnboardingWizard 
+        open={onboardingOpen} 
+        onComplete={() => setOnboardingOpen(false)}
+        onSkip={() => setOnboardingOpen(false)}
+      />
     </div>
   );
 };
