@@ -882,6 +882,9 @@ Let me start with the analysis...
 
   // Swarm tier (DeepSeek) with tool calling
   ipcMain.handle('chat-swarm', async (_event, messagesRaw: unknown) => {
+    // Reset cancellation state at start of new request
+    resetCancellation();
+
     try {
       // Validate messages at IPC boundary
       const messages = validateIPC(ChatMessagesSchema, messagesRaw, 'chat messages');
@@ -1038,6 +1041,9 @@ Let me start with the analysis...
 
   // Swarm parallel (DeepSeek) - multiple agents without tools for speed
   ipcMain.handle('chat-swarm-parallel', async (_event, promptsRaw: unknown) => {
+    // Reset cancellation state at start of new request
+    resetCancellation();
+
     try {
       // Validate swarm prompts at IPC boundary
       const prompts = validateIPC(SwarmPromptsSchema, promptsRaw, 'swarm prompts');
@@ -1048,20 +1054,31 @@ Let me start with the analysis...
       }
 
       const promises = prompts.map(async (prompt) => {
-        const completion = await withRetry(() => deepseekClient.chat.completions.create({
-          model: SWARM_MODEL,
-          messages: prompt.messages.map(m => ({
-            role: m.role as 'user' | 'assistant' | 'system',
-            content: m.content
-          }))
-        }));
+        try {
+          const completion = await withRetry(() => deepseekClient.chat.completions.create({
+            model: SWARM_MODEL,
+            messages: prompt.messages.map(m => ({
+              role: m.role as 'user' | 'assistant' | 'system',
+              content: m.content
+            }))
+          }));
 
-        return {
-          agentId: prompt.agentId,
-          content: completion.choices[0].message.content || ''
-        };
+          return {
+            agentId: prompt.agentId,
+            content: completion.choices[0].message.content || '',
+            success: true
+          };
+        } catch (error: any) {
+          // Return error as result instead of failing entire Promise.all
+          return {
+            agentId: prompt.agentId,
+            content: `Agent failed: ${error.message}`,
+            success: false
+          };
+        }
       });
 
+      // All promises handle their own errors, so Promise.all won't throw
       return await Promise.all(promises);
     } catch (error) {
       console.error('Error in chat-swarm-parallel:', error);
