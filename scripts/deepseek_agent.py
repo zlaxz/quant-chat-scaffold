@@ -40,7 +40,7 @@ def call_deepseek(messages: list, max_tokens: int = 4000) -> dict:
             '-H', 'Content-Type: application/json',
             '-H', f'Authorization: Bearer {DEEPSEEK_API_KEY}',
             '-d', payload
-        ], capture_output=True, text=True, timeout=120)
+        ], capture_output=True, text=True, timeout=600)  # 10 minute timeout
 
         if result.returncode != 0:
             return {'error': f'curl failed: {result.stderr}'}
