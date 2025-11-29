@@ -669,6 +669,17 @@ export const ChatArea = () => {
     setMessages(prev => [...prev, userMsg]);
 
     await new Promise(r => setTimeout(r, 300));
+    
+    // Add system message showing command execution
+    const systemMsg: Message = {
+      id: `demo-system-${Date.now()}`,
+      role: 'system',
+      content: 'Command: /search_code pattern:convexity path:rotation-engine',
+      created_at: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, systemMsg]);
+
+    await new Promise(r => setTimeout(r, 300));
 
     // Show memory recall
     setMemoryRecalls(getDemoMemoryRecalls());
@@ -808,13 +819,62 @@ Each profile is regime-aware and adjusts parameters based on VIX levels and mark
     };
     setMessages(prev => [...prev, assistantMsg]);
 
+    // Add mock operation cards to show the kanban design
+    const mockOperations: OperationCardData[] = [
+      {
+        id: 'demo-op-1',
+        tool: 'read_file',
+        args: {
+          filePath: '/rotation-engine/strategies/short_gamma_scalper.py',
+        },
+        result: {
+          content: 'Successfully read 342 lines of strategy code',
+          lines: 342,
+        },
+        timestamp: Date.now() - 3000,
+        duration: 45,
+        success: true,
+      },
+      {
+        id: 'demo-op-2',
+        tool: 'list_dir',
+        args: {
+          path: '/rotation-engine/data/2024',
+        },
+        result: [
+          { name: 'SPX_2024-01-15.csv', type: 'file' },
+          { name: 'SPX_2024-02-15.csv', type: 'file' },
+          { name: 'VIX_2024-01-15.csv', type: 'file' },
+        ],
+        timestamp: Date.now() - 2000,
+        duration: 23,
+        success: true,
+      },
+      {
+        id: 'demo-op-3',
+        tool: 'search_code',
+        args: {
+          pattern: 'convexity',
+          path: '/rotation-engine/src',
+        },
+        result: {
+          matches: 23,
+          files: ['profile_manager.py', 'regime_detector.py', 'backtest_engine.py'],
+        },
+        timestamp: Date.now() - 1000,
+        duration: 167,
+        success: true,
+      },
+    ];
+    setOperationCards(mockOperations);
+
     setIsLoading(false);
     setStreamingContent('');
     setToolProgress([]);
 
     toast({
       title: '✨ Demo Complete',
-      description: 'This is how the conversation UI will look with Gemini 3 Pro',
+      description: 'Check out the new kanban-style card design!',
     });
   };
 
