@@ -2,7 +2,13 @@ import { ipcMain } from 'electron';
 import { spawn } from 'child_process';
 import path from 'path';
 import fs from 'fs/promises';
+import { createClient } from '@supabase/supabase-js';
 import { validateIPC, BacktestParamsSchema } from '../validation/schemas';
+
+// Supabase client for database persistence
+const SUPABASE_URL = 'https://ynaqtawyynqikfyranda.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InluYXF0YXd5eW5xaWtmeXJhbmRhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjM1NzM5NjMsImV4cCI6MjA3OTE0OTk2M30.VegcJvLluy8toSYqnR7Ufc5jx5XAl1-XeDRl8KbsIIw';
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // Get rotation engine root dynamically at runtime
 function getRotationEngineRoot(): string {
@@ -89,18 +95,58 @@ export function registerPythonExecutionHandlers() {
       await fs.mkdir(path.dirname(resultsPath), { recursive: true });
       await fs.writeFile(resultsPath, JSON.stringify(results, null, 2), 'utf-8');
 
+      // Save to Supabase database for UI display and analysis
+      try {
+        const { error: dbError } = await supabase
+          .from('backtest_runs')
+          .insert({
+            id: runId,
+            strategy_key: params.strategyKey,
+            params: {
+              start_date: params.startDate,
+              end_date: params.endDate,
+              capital: params.capital,
+              profile_config: params.profileConfig
+            },
+            metrics: results.metrics,
+            equity_curve: results.equity_curve,
+            status: 'completed',
+            engine_source: 'rotation-engine',
+            raw_results_url: resultsPath,
+            started_at: new Date().toISOString(),
+            completed_at: new Date().toISOString()
+          });
+
+        if (dbError) {
+          console.error('[Backtest] Failed to save to database:', dbError);
+          // Continue anyway - local file is saved
+        } else {
+          console.log('[Backtest] ✅ Saved to database:', runId);
+        }
+      } catch (dbSaveError) {
+        console.error('[Backtest] Database save exception:', dbSaveError);
+        // Continue anyway - local file is saved
+      }
+
       return {
         success: true,
+        runId,
         metrics: results.metrics,
         equityCurve: results.equity_curve,
         trades: results.trades,
         rawResultsPath: resultsPath,
       };
     } catch (error) {
-      console.error('Error running backtest:', error);
+      const errorDetails = error instanceof Error 
+        ? `${error.message}\n\nStack:\n${error.stack}`
+        : String(error);
+      
+      console.error('[Backtest] Error:', errorDetails);
+      
       return {
         success: false,
         error: error instanceof Error ? error.message : 'Unknown error',
+        errorDetails: errorDetails
       };
     }
   });

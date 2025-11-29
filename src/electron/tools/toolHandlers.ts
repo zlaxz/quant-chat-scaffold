@@ -1492,7 +1492,7 @@ async function executeAgentTool(toolName: string, args: Record<string, any>): Pr
         result = await writeFile(args.path, args.content);
         break;
       case 'run_python_script':
-        result = await runPythonScript(args.script_path, args.args, args.timeout);
+        result = await runPythonScript(args.script_path, args.args, args.timeout_seconds);
         break;
       case 'run_command':
         result = await runCommand(args.command);
@@ -2006,7 +2006,7 @@ export async function executeTool(
 
     // Python execution
     case 'run_python_script':
-      return runPythonScript(args.script_path, args.args, args.timeout);
+      return runPythonScript(args.script_path, args.args, args.timeout_seconds);
 
     // Git operations
     case 'git_status':

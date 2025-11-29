@@ -3,6 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import os from 'os';
+import { execSync } from 'child_process';
 import Store from 'electron-store';
 import Database from 'better-sqlite3';
 import { createClient } from '@supabase/supabase-js';
@@ -68,6 +69,63 @@ function createWindow() {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+}
+
+// Validate Python environment
+async function validatePythonEnvironment(): Promise<{ valid: boolean; error?: string }> {
+  const engineRoot = process.env.ROTATION_ENGINE_ROOT;
+  
+  if (!engineRoot) {
+    return {
+      valid: false,
+      error: 'ROTATION_ENGINE_ROOT not configured. Go to Settings → Project Directory.'
+    };
+  }
+  
+  // Check Python3 exists
+  try {
+    const pythonVersion = execSync('python3 --version', { encoding: 'utf8' });
+    console.log(`[Validation] Python found: ${pythonVersion.trim()}`);
+  } catch {
+    return {
+      valid: false,
+      error: 'Python3 not found. Install Python 3.7+ from python.org\n\nSee QUICKSTART.md for installation help.'
+    };
+  }
+  
+  // Check rotation-engine directory
+  if (!fs.existsSync(engineRoot)) {
+    return {
+      valid: false,
+      error: `Rotation engine directory not found: ${engineRoot}\n\nUpdate ROTATION_ENGINE_ROOT in .env`
+    };
+  }
+  
+  // Check cli_wrapper.py exists
+  const cliWrapperPath = path.join(engineRoot, 'rotation-engine-bridge', 'cli_wrapper.py');
+  if (!fs.existsSync(cliWrapperPath)) {
+    return {
+      valid: false,
+      error: 'rotation-engine-bridge/cli_wrapper.py not found.\n\nSee QUICKSTART.md for setup instructions.'
+    };
+  }
+  
+  // Check if executable (Unix-like systems)
+  if (process.platform !== 'win32') {
+    try {
+      fs.accessSync(cliWrapperPath, fs.constants.X_OK);
+    } catch {
+      console.warn('[Validation] cli_wrapper.py not executable, trying to fix...');
+      try {
+        execSync(`chmod +x ${cliWrapperPath}`);
+        console.log('[Validation] Made cli_wrapper.py executable');
+      } catch (e) {
+        console.warn('[Validation] Could not make cli_wrapper.py executable:', e);
+      }
+    }
+  }
+  
+  return { valid: true };
 }
 
 app.whenReady().then(() => {
@@ -330,8 +388,21 @@ app.whenReady().then(() => {
   );
 
   // Start memory daemon and wait for it before creating window
-  memoryDaemon.start().then(() => {
+  memoryDaemon.start().then(async () => {
     console.log('[Main] Memory daemon started successfully');
+    
+    // Validate Python environment
+    const validation = await validatePythonEnvironment();
+    if (!validation.valid) {
+      console.error('[Validation] Python environment check failed:', validation.error);
+      dialog.showErrorBox(
+        'Python Environment Error',
+        `${validation.error}\n\nThe app will start but backtests will not work until this is fixed.`
+      );
+    } else {
+      console.log('[Validation] ✅ Python environment ready');
+    }
+    
     createWindow();
   }).catch(err => {
     console.error('[Main] Failed to start memory daemon:', err);
