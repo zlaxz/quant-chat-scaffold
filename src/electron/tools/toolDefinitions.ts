@@ -128,7 +128,7 @@ export const PYTHON_TOOLS: FunctionDeclaration[] = [
             type: SchemaType.STRING
           }
         },
-        timeout: {
+        timeout_seconds: {
           type: SchemaType.NUMBER,
           description: 'Maximum execution time in seconds (default: 300)'
         }
