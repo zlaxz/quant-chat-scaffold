@@ -10,6 +10,7 @@ export interface ToolResult {
   success: boolean;
   content: string;
   error?: string;
+  metadata?: any; // Additional structured data for specialized rendering
 }
 
 // Get rotation-engine root from environment or settings

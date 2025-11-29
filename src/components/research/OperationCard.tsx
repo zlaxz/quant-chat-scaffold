@@ -8,6 +8,7 @@ import { FileCode, FolderOpen, Database, Calendar, Clock, CheckCircle2, XCircle,
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { cn } from '@/lib/utils';
+import { PythonExecutionPanel, PythonExecutionData } from './PythonExecutionPanel';
 
 export interface OperationCardData {
   id: string;
@@ -117,6 +118,25 @@ function formatResult(result: any): string {
 }
 
 export function OperationCard({ operation, className }: OperationCardProps) {
+  // Check if this is a Python execution - render specialized panel
+  if (operation.tool === 'run_python_script' && operation.result?.metadata?.pythonExecution) {
+    const meta = operation.result.metadata;
+    const pythonData: PythonExecutionData = {
+      id: operation.id,
+      scriptPath: meta.scriptPath || operation.args.scriptPath || operation.args.path || 'unknown',
+      args: meta.args || operation.args.args || [],
+      command: meta.command || 'python3 ...',
+      stdout: meta.stdout || '',
+      stderr: meta.stderr || '',
+      exitCode: meta.exitCode ?? null,
+      duration: meta.duration || operation.duration || 0,
+      timestamp: operation.timestamp,
+      status: meta.status || (operation.success ? 'completed' : 'failed'),
+      timeout: meta.timeout || operation.args.timeout
+    };
+    return <PythonExecutionPanel execution={pythonData} className={className} />;
+  }
+
   const keyInfo = extractKeyInfo(operation.args);
   const resultPreview = operation.error 
     ? operation.error 

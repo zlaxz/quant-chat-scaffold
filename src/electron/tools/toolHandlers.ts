@@ -56,6 +56,7 @@ export interface ToolResult {
   success: boolean;
   content: string;
   error?: string;
+  metadata?: any; // Additional structured data for specialized rendering
 }
 
 // Get rotation-engine root from environment or settings
@@ -134,6 +135,9 @@ export async function runPythonScript(
   args?: string[],
   timeoutSeconds?: number
 ): Promise<ToolResult> {
+  const startTime = Date.now();
+  let timedOut = false;
+  
   try {
     const root = getEngineRoot();
     const fullPath = safeResolvePath(scriptPath);
@@ -143,7 +147,18 @@ export async function runPythonScript(
       return {
         success: false,
         content: '',
-        error: `Python script not found: ${scriptPath}`
+        error: `Python script not found: ${scriptPath}`,
+        metadata: {
+          pythonExecution: true,
+          scriptPath,
+          args: args || [],
+          command: `python3 ${scriptPath} ${args?.join(' ') || ''}`,
+          stdout: '',
+          stderr: '',
+          exitCode: null,
+          duration: Date.now() - startTime,
+          status: 'failed'
+        }
       };
     }
 
@@ -158,7 +173,10 @@ export async function runPythonScript(
 
     // Execute with timeout
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeout);
 
     try {
       const result = await execAsync(command, {
@@ -168,21 +186,45 @@ export async function runPythonScript(
       });
 
       clearTimeout(timeoutId);
+      const duration = Date.now() - startTime;
 
-      const output = result.stdout + (result.stderr ? `\n[stderr]: ${result.stderr}` : '');
-      
       return {
         success: true,
-        content: output || 'Script completed with no output'
+        content: result.stdout || 'Script completed with no output',
+        metadata: {
+          pythonExecution: true,
+          scriptPath,
+          args: args || [],
+          command,
+          stdout: result.stdout || '',
+          stderr: result.stderr || '',
+          exitCode: 0,
+          duration,
+          status: 'completed',
+          timeout
+        }
       };
     } catch (error: any) {
       clearTimeout(timeoutId);
+      const duration = Date.now() - startTime;
 
-      if (error.name === 'AbortError' || error.killed) {
+      if (error.name === 'AbortError' || error.killed || timedOut) {
         return {
           success: false,
           content: error.stdout || '',
-          error: `Script timed out after ${timeoutSeconds || 300} seconds`
+          error: `Script timed out after ${timeoutSeconds || 300} seconds`,
+          metadata: {
+            pythonExecution: true,
+            scriptPath,
+            args: args || [],
+            command,
+            stdout: error.stdout || '',
+            stderr: error.stderr || '',
+            exitCode: null,
+            duration,
+            status: 'timeout',
+            timeout
+          }
         };
       }
 
@@ -190,14 +232,38 @@ export async function runPythonScript(
       return {
         success: false,
         content: error.stdout || '',
-        error: `Script failed: ${error.stderr || error.message}`
+        error: `Script failed: ${error.stderr || error.message}`,
+        metadata: {
+          pythonExecution: true,
+          scriptPath,
+          args: args || [],
+          command,
+          stdout: error.stdout || '',
+          stderr: error.stderr || error.message,
+          exitCode: error.code || 1,
+          duration,
+          status: 'failed',
+          timeout
+        }
       };
     }
   } catch (error: any) {
+    const duration = Date.now() - startTime;
     return {
       success: false,
       content: '',
-      error: `Failed to execute script: ${error.message}`
+      error: `Failed to execute script: ${error.message}`,
+      metadata: {
+        pythonExecution: true,
+        scriptPath,
+        args: args || [],
+        command: `python3 ${scriptPath} ${args?.join(' ') || ''}`,
+        stdout: '',
+        stderr: error.message,
+        exitCode: null,
+        duration,
+        status: 'failed'
+      }
     };
   }
 }
